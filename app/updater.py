@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""새 버전 확인·받기 (GitHub 공개 저장소의 Releases).
+"""새 버전 확인·받기 (GitHub 공개 저장소).
 
-- 새 버전 = 저장소의 최신 Release. 이름(tag)이 v3.2 처럼 버전 번호, 첨부 파일은 app.zip (app 폴더 내용).
+- 새 버전 = 저장소 main 의 release/latest.json {"version": "3.2", "notes": "..."} 과 release/app.zip (app 폴더 내용).
 - 받은 app.zip 의 파일로 app 폴더 파일을 덮어씀. 내 정보·내 서식 등은 app 폴더 밖(APPDATA)에 있어 그대로 남음.
 - 덮어쓰기 전 원래 파일은 app\\_backup\\<원래 버전>\\ 에 보관.
 """
@@ -47,18 +47,20 @@ def _get(url, timeout, accept="application/vnd.github+json"):
         return r.read()
 
 
+RAW = "https://raw.githubusercontent.com/{}/main/release/{}"
+
+
 def latest(timeout=5):
-    """최신 Release 정보 {version, notes, url} — 없거나 못 읽으면 None."""
+    """최신 버전 정보 {version, notes, url} — 없거나 못 읽으면 None."""
     rp = repo()
     if not rp:
         return None
-    data = json.loads(_get("https://api.github.com/repos/{}/releases/latest".format(rp), timeout).decode("utf-8"))
-    tag = data.get("tag_name") or ""
-    asset = next((a for a in data.get("assets", []) if a.get("name", "").lower() == "app.zip"), None)
-    if not tag or not asset:
+    data = json.loads(_get(RAW.format(rp, "latest.json"), timeout, "application/json").decode("utf-8-sig"))
+    ver = str(data.get("version") or "").strip()
+    if not ver:
         return None
-    return {"version": tag.lstrip("vV"), "notes": (data.get("body") or "").strip(),
-            "url": asset.get("browser_download_url"), "size": asset.get("size", 0)}
+    return {"version": ver.lstrip("vV"), "notes": (data.get("notes") or "").strip(),
+            "url": RAW.format(rp, data.get("file") or "app.zip")}
 
 
 def newer(info):
