@@ -425,7 +425,7 @@ class App:
         def worker():
             st = hwpctl.probe(4)
             if st == "none":
-                hwpctl.launch()
+                self._conn["launched"] = hwpctl.launch()
             t0 = time.time()
             while st in ("none", "busy") and time.time() - t0 < 60:   # 켜지는 중이거나 확인 창이 닫히길 기다림
                 time.sleep(1)
@@ -451,7 +451,7 @@ class App:
         try:
             if st == "ok":
                 if c["new_doc"]:
-                    msg = self.hwp.start_new()
+                    msg = self.hwp.start_new(launched=c.get("launched", False))
                 else:
                     self.hwp.connect(create=False)
                     msg = "다시 연결했습니다"

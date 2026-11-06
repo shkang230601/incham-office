@@ -174,15 +174,15 @@ class Hwp:
                 return found[-1]
         return None
 
-    def start_new(self):
-        """프로그램을 켤 때: 한글이 켜져 있으면 새 문서를 열고, 꺼져 있으면 한글을 새로 켬."""
+    def start_new(self, launched=False):
+        """프로그램을 켤 때: 한글이 켜져 있으면 연결만 하고(새 문서를 열지 않음), 꺼져 있으면 한글을 켬.
+        한글은 켜질 때 빈 문서를 스스로 하나 여니 따로 새 문서를 만들지 않음."""
         import subprocess
         import time
         h = self._find_running()
-        if h is not None:
+        if h is not None:                       # 한글이 켜져 있으면 연결만 (새 문서는 열지 않음)
             self.h = h
-            self.run("FileNew")
-            return "새 문서를 열었습니다"
+            return "한글을 켰습니다" if launched else "한글에 연결했습니다"
         exe = None
         try:
             exe = self._hwp_exe()

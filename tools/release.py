@@ -57,13 +57,22 @@ def check_private(folder):
         sys.exit("개인 정보가 남아 있어 멈춤:\n  " + "\n  ".join(bad))
 
 
-def zip_dir(folder, zpath, arc_prefix=""):
+# 업데이트 묶음(app.zip)에서 빼는 것: 글꼴은 프로그램이 켜져 있는 동안 잠겨 있어
+# 3.1의 옛 업데이트 기능이 덮어쓰다 멈춤. 글꼴은 바뀌지 않으니 첫 설치용에만 넣는다.
+# (글꼴을 바꿔야 하면 이 줄을 비우고, 3.2 이상 사용자만 받게 된다는 점을 확인할 것)
+UPDATE_SKIP = ("assets/fonts/",)
+
+
+def zip_dir(folder, zpath, arc_prefix="", skip=()):
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for root, dirs, files in os.walk(folder):
             dirs[:] = [d for d in dirs if d != "__pycache__"]
             for fn in files:
                 p = os.path.join(root, fn)
-                z.write(p, os.path.join(arc_prefix, os.path.relpath(p, folder)).replace("\\", "/"))
+                rel = os.path.relpath(p, folder).replace("\\", "/")
+                if any(rel.startswith(s) for s in skip):
+                    continue
+                z.write(p, os.path.join(arc_prefix, rel).replace("\\", "/"))
 
 
 def main():
@@ -87,7 +96,7 @@ def main():
     check_private(stage)
 
     app_zip = os.path.join(out, "app.zip")
-    zip_dir(os.path.join(stage, "app"), app_zip)
+    zip_dir(os.path.join(stage, "app"), app_zip, skip=UPDATE_SKIP)
     print("업데이트용:", app_zip, os.path.getsize(app_zip) // 1024, "KB")
     if a.python:
         shutil.copytree(a.python, os.path.join(stage, "python"), ignore=shutil.ignore_patterns("__pycache__"))
