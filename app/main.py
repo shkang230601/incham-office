@@ -77,6 +77,36 @@ TEXT = "#222222"
 MUTED = "#8694b6"       # 보조 글자
 OK_GREEN = "#1e9e6a"
 FONT = ("맑은 고딕", 9)
+
+# 업데이트·안내 창 글꼴: 프리텐다드(OFL)를 줄인 InchamSans — 설치하지 않고 이 프로그램 안에서만 불러 씀
+UI_FAMILY = {"r": "맑은 고딕", "s": "맑은 고딕", "b": "맑은 고딕"}
+
+
+def load_ui_fonts(root):
+    try:
+        import ctypes
+        import tkinter.font as tkfont
+        d = os.path.join(APP, "assets", "fonts")
+        for f in ("InchamSans-Regular.ttf", "InchamSans-SemiBold.ttf", "InchamSans-Bold.ttf"):
+            p = os.path.join(d, f)
+            if os.path.exists(p):
+                ctypes.windll.gdi32.AddFontResourceExW(p, 0x10, 0)     # 0x10 = 이 프로그램에서만
+        fams = set(tkfont.families(root))
+        if "InchamSans" in fams:
+            UI_FAMILY.update({"r": "InchamSans", "b": "InchamSans",
+                              "s": "InchamSans SemiBold" if "InchamSans SemiBold" in fams else "InchamSans"})
+    except Exception:
+        pass
+
+
+def uf(size, w="r", underline=False):
+    """업데이트·안내 창 글꼴. w: r 보통 · s 중간 굵기 · b 굵게"""
+    f = [UI_FAMILY[w], size]
+    if w == "b":
+        f.append("bold")
+    if underline:
+        f.append("underline")
+    return tuple(f)
 FONT_S = ("맑은 고딕", 8)
 FONT_B = ("맑은 고딕", 9, "bold")
 FONT_T = ("맑은 고딕", 10, "bold")
@@ -467,12 +497,12 @@ class App:
             if img:
                 cv.create_image(W // 2, top + tile // 2, image=img)
             top += tile + 12
-        cv.create_text(W // 2, top + 10, text=title, fill="white", font=("맑은 고딕", 14, "bold"))
+        cv.create_text(W // 2, top + 10, text=title, fill="white", font=uf(15, "b"))
         if sub:                                     # (지금 버전, 새 버전) 알약
             y = top + 40
             old, new = "v" + sub[0], "v" + sub[1]
-            fo = ("맑은 고딕", 9)
-            fb = ("맑은 고딕", 9, "bold")
+            fo = uf(9, "s")
+            fb = uf(9, "b")
             import tkinter.font as tkfont
             wo = tkfont.Font(font=fo).measure(old) + 24
             wn = tkfont.Font(font=fb).measure(new) + 24
@@ -490,7 +520,7 @@ class App:
         """둥근 느낌의 넓은 버튼 (Label로 그려 테두리 없이)."""
         bg, fg, hov = (NAVY, "white", NAVY_HOVER) if primary else ("white", MUTED, "white")
         b = tk.Label(parent, text=text, bg=bg, fg=fg, cursor="hand2",
-                     font=("맑은 고딕", 11, "bold") if primary else ("맑은 고딕", 9, "underline"),
+                     font=uf(11, "b") if primary else uf(9, "r", True),
                      pady=10 if primary else 2)
         b.enabled = True
 
@@ -518,7 +548,7 @@ class App:
         self._upd_header(w, 112, title, icon=40)
         body = tk.Frame(w, bg="white", padx=24, pady=16)
         body.pack(fill="both")
-        tk.Label(body, text=msg, bg="white", fg=TEXT if ok else "#d93636", font=("맑은 고딕", 10),
+        tk.Label(body, text=msg, bg="white", fg=TEXT if ok else "#d93636", font=uf(10),
                  justify="center", wraplength=self.UPD_W - 48).pack(pady=(0, 14))
         btn = self._upd_button(body, "확인", w.destroy)
         btn.pack(fill="x")
@@ -533,16 +563,16 @@ class App:
         self._upd_header(w, 184, "새 버전이 있습니다", sub=(VERSION, info["version"]))
         body = tk.Frame(w, bg="white", padx=20, pady=14)
         body.pack(fill="both", expand=True)
-        tk.Label(body, text="업데이트 내용", bg="white", fg=MUTED, font=("맑은 고딕", 9)).pack(anchor="w", pady=(0, 6))
+        tk.Label(body, text="업데이트 내용", bg="white", fg=MUTED, font=uf(9, "s")).pack(anchor="w", pady=(0, 6))
         box = tk.Frame(body, bg="#f7f9fc", highlightthickness=1, highlightbackground=LINE)
         box.pack(fill="both", expand=True)
         txt = tk.Text(box, height=9, width=30, wrap="word", bd=0, bg="#f7f9fc", fg=TEXT,
-                      font=("맑은 고딕", 10), padx=12, pady=10, spacing1=2, spacing3=3, cursor="arrow")
+                      font=uf(10), padx=12, pady=10, spacing1=2, spacing3=3, cursor="arrow")
         sb = ttk.Scrollbar(box, orient="vertical", command=txt.yview)
         txt.configure(yscrollcommand=sb.set)
         txt.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
-        txt.tag_configure("b", font=("맑은 고딕", 10, "bold"), spacing1=6)
+        txt.tag_configure("b", font=uf(10, "b"), spacing1=6)
         txt.tag_configure("li", lmargin1=6, lmargin2=20)
         notes = (info.get("notes") or "").strip() or "자잘한 부분을 고쳤습니다."
         for line in notes.splitlines():
@@ -559,14 +589,14 @@ class App:
         rp = updater.repo() if updater else ""
         if rp:
             link = tk.Label(body, text="GitHub에서 전체 보기", bg="white", fg="#3b5bdb", cursor="hand2",
-                            font=("맑은 고딕", 9, "underline"))
+                            font=uf(9, "r", True))
             link.pack(anchor="w", pady=(6, 0))
 
             def open_link(e=None):
                 import webbrowser
                 webbrowser.open("https://github.com/{}/commits/main".format(rp))
             link.bind("<Button-1>", open_link)
-        status = tk.Label(body, text="", bg="white", fg=MUTED, font=("맑은 고딕", 9))
+        status = tk.Label(body, text="", bg="white", fg=MUTED, font=uf(9), wraplength=self.UPD_W - 40)
         status.pack(fill="x", pady=(8, 0))
         main_btn = None
 
@@ -2170,6 +2200,7 @@ def main():
     log("시작 (버전 {})".format(VERSION))
     make_shortcut()
     root = tk.Tk()
+    load_ui_fonts(root)
     app = App(root)
     root.after(3000, app.check_update)       # 켜고 3초 뒤 조용히 새 버전 확인
     root.mainloop()
