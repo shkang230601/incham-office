@@ -404,41 +404,226 @@ class App:
             if box.get("err") is not None:
                 log("업데이트 확인 실패: {}".format(box["err"]))
                 if manual:
-                    messagebox.showinfo(TITLE, "새 버전을 확인하지 못했습니다.\n인터넷 연결을 확인해 주세요.", parent=self.root)
+                    self.notice("확인하지 못했습니다", "새 버전을 확인하지 못했습니다.\n인터넷 연결을 확인해 주세요.", ok=False)
                 return
             if not updater.newer(info):
                 if manual:
-                    messagebox.showinfo(TITLE, "지금 쓰는 버전({})이 최신입니다.".format(VERSION), parent=self.root)
+                    self.notice("최신 버전입니다", "지금 쓰는 버전({})이 최신입니다.".format(VERSION))
                 return
             self.ask_update(info)
         self.root.after(200, poll)
 
-    def ask_update(self, info):
-        notes = info.get("notes") or ""
-        if len(notes) > 600:
-            notes = notes[:600] + " …"
-        msg = "새 버전이 있습니다.  {} → {}\n\n{}\n\n지금 업데이트할까요? (1분 안에 끝나고 프로그램이 다시 켜집니다)".format(
-            VERSION, info["version"], notes or "")
-        if not messagebox.askyesno(TITLE, msg, parent=self.root):
-            return
-        self.set_status("업데이트 받는 중…")
-        self.root.update()
+    # --- 업데이트 창 (이음오피스 느낌: 남색 머리 + 로고 + 버전 알약 + 내용 + 큰 버튼) ---
+    UPD_W = 380
+    NAVY_LIGHT = "#4b4ab3"
+
+    def _upd_icon(self, size):
+        """로고 아이콘을 size 픽셀 근처로 줄인 그림 (창마다 따로 보관)."""
         try:
-            n = updater.install(info)
-        except Exception as e:
-            log("업데이트 실패\n" + traceback.format_exc())
-            messagebox.showerror(TITLE, "업데이트하지 못했습니다.\n{}\n\n지금 버전은 그대로 쓸 수 있습니다.".format(e), parent=self.root)
-            self.set_status("업데이트 실패", ok=False)
-            return
-        log("업데이트 {} → {} (파일 {}개)".format(VERSION, info["version"], n))
-        messagebox.showinfo(TITLE, "{} 버전으로 바꿨습니다. 프로그램을 다시 켭니다.".format(info["version"]), parent=self.root)
-        try:
-            import subprocess
-            subprocess.Popen([sys.executable, os.path.join(APP, "main.py")], cwd=os.path.dirname(APP))
+            img = tk.PhotoImage(file=os.path.join(APP, "assets", "icon.png"))
+            k = max(1, img.width() // size)
+            img = img.subsample(k, k)
+            self._imgs.append(img)
+            return img
         except Exception:
-            log("다시 켜기 실패\n" + traceback.format_exc())
-            messagebox.showinfo(TITLE, "프로그램을 닫았다가 다시 켜 주세요.", parent=self.root)
-        self.root.destroy()
+            return None
+
+    @staticmethod
+    def _round_rect(cv, x1, y1, x2, y2, r, **kw):
+        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2,
+               x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return cv.create_polygon(pts, smooth=True, **kw)
+
+    def _upd_window(self, title):
+        w = tk.Toplevel(self.root)
+        w.title(title)
+        w.configure(bg="white")
+        w.resizable(False, False)
+        w.attributes("-topmost", True)
+        try:
+            w.iconbitmap(os.path.join(APP, "assets", "icon_kcci.ico"))
+        except Exception:
+            pass
+        w.transient(self.root)
+        return w
+
+    def _upd_header(self, w, height, title, sub=None, icon=56):
+        """남색 그라데이션 머리: 흰 바탕 둥근 칸 안 로고 + 제목 (+ 버전 알약)."""
+        W = self.UPD_W
+        cv = tk.Canvas(w, width=W, height=height, highlightthickness=0, bd=0, bg=NAVY)
+        cv.pack(fill="x")
+        c1 = tuple(int(NAVY[i:i + 2], 16) for i in (1, 3, 5))
+        c2 = tuple(int(self.NAVY_LIGHT[i:i + 2], 16) for i in (1, 3, 5))
+        for y in range(height):                     # 위는 밝게, 아래로 갈수록 남색
+            t = y / max(1, height - 1)
+            col = "#%02x%02x%02x" % tuple(int(c2[k] + (c1[k] - c2[k]) * t) for k in range(3))
+            cv.create_line(0, y, W, y, fill=col)
+        top = 18
+        if icon:
+            tile = icon + 14
+            x0 = (W - tile) // 2
+            self._round_rect(cv, x0, top, x0 + tile, top + tile, 16, fill="white", outline="")
+            img = self._upd_icon(icon)
+            if img:
+                cv.create_image(W // 2, top + tile // 2, image=img)
+            top += tile + 12
+        cv.create_text(W // 2, top + 10, text=title, fill="white", font=("맑은 고딕", 14, "bold"))
+        if sub:                                     # (지금 버전, 새 버전) 알약
+            y = top + 40
+            old, new = "v" + sub[0], "v" + sub[1]
+            fo = ("맑은 고딕", 9)
+            fb = ("맑은 고딕", 9, "bold")
+            import tkinter.font as tkfont
+            wo = tkfont.Font(font=fo).measure(old) + 24
+            wn = tkfont.Font(font=fb).measure(new) + 24
+            gap = 30
+            x = (W - (wo + gap + wn)) // 2
+            self._round_rect(cv, x, y - 11, x + wo, y + 11, 11, fill="#6564c2", outline="")
+            cv.create_text(x + wo // 2, y, text=old, fill="#e6e6fa", font=fo)
+            cv.create_text(x + wo + gap // 2, y, text="→", fill="white", font=fb)
+            x2 = x + wo + gap
+            self._round_rect(cv, x2, y - 11, x2 + wn, y + 11, 11, fill="white", outline="")
+            cv.create_text(x2 + wn // 2, y, text=new, fill=NAVY, font=fb)
+        return cv
+
+    def _upd_button(self, parent, text, cmd, primary=True):
+        """둥근 느낌의 넓은 버튼 (Label로 그려 테두리 없이)."""
+        bg, fg, hov = (NAVY, "white", NAVY_HOVER) if primary else ("white", MUTED, "white")
+        b = tk.Label(parent, text=text, bg=bg, fg=fg, cursor="hand2",
+                     font=("맑은 고딕", 11, "bold") if primary else ("맑은 고딕", 9, "underline"),
+                     pady=10 if primary else 2)
+        b.enabled = True
+
+        def click(e=None):
+            if b.enabled:
+                cmd()
+        b.bind("<Button-1>", click)
+        if primary:
+            b.bind("<Enter>", lambda e: b.enabled and b.config(bg=hov))
+            b.bind("<Leave>", lambda e: b.enabled and b.config(bg=bg))
+        return b
+
+    def _upd_center(self, w):
+        w.update_idletasks()
+        W, H = self.UPD_W, w.winfo_reqheight()      # 너비는 머리 그림과 같게 고정 (내용은 그 안에서 줄바꿈)
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - W) // 2
+        y = self.root.winfo_rooty() + 80
+        w.geometry("{}x{}+{}+{}".format(W, H, max(0, x), max(0, y)))
+        w.lift()
+        w.focus_force()
+
+    def notice(self, title, msg, ok=True):
+        """작은 안내 창 — 업데이트 창과 같은 모양 (남색 머리 + 로고 + 한두 줄 + 확인)."""
+        w = self._upd_window(TITLE)
+        self._upd_header(w, 112, title, icon=40)
+        body = tk.Frame(w, bg="white", padx=24, pady=16)
+        body.pack(fill="both")
+        tk.Label(body, text=msg, bg="white", fg=TEXT if ok else "#d93636", font=("맑은 고딕", 10),
+                 justify="center", wraplength=self.UPD_W - 48).pack(pady=(0, 14))
+        btn = self._upd_button(body, "확인", w.destroy)
+        btn.pack(fill="x")
+        w.bind("<Return>", lambda e: w.destroy())
+        w.bind("<Escape>", lambda e: w.destroy())
+        self._upd_center(w)
+        return w
+
+    def ask_update(self, info):
+        """새 버전 안내 창. [지금 업데이트] → 받는 중 → 바꿈 → 다시 켜기 (모두 이 창 안에서)."""
+        w = self._upd_window("업데이트")
+        self._upd_header(w, 184, "새 버전이 있습니다", sub=(VERSION, info["version"]))
+        body = tk.Frame(w, bg="white", padx=20, pady=14)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="업데이트 내용", bg="white", fg=MUTED, font=("맑은 고딕", 9)).pack(anchor="w", pady=(0, 6))
+        box = tk.Frame(body, bg="#f7f9fc", highlightthickness=1, highlightbackground=LINE)
+        box.pack(fill="both", expand=True)
+        txt = tk.Text(box, height=9, width=30, wrap="word", bd=0, bg="#f7f9fc", fg=TEXT,
+                      font=("맑은 고딕", 10), padx=12, pady=10, spacing1=2, spacing3=3, cursor="arrow")
+        sb = ttk.Scrollbar(box, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        txt.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        txt.tag_configure("b", font=("맑은 고딕", 10, "bold"), spacing1=6)
+        txt.tag_configure("li", lmargin1=6, lmargin2=20)
+        notes = (info.get("notes") or "").strip() or "자잘한 부분을 고쳤습니다."
+        for line in notes.splitlines():
+            ln = line.rstrip()
+            if not ln.strip():
+                txt.insert("end", "\n")
+            elif ln.lstrip().startswith(("- ", "· ", "* ")):
+                txt.insert("end", "•  " + ln.lstrip()[2:] + "\n", "li")
+            elif ln.endswith(":") or ln.startswith("#"):
+                txt.insert("end", ln.lstrip("# ").rstrip(":") + "\n", "b")
+            else:
+                txt.insert("end", ln + "\n")
+        txt.configure(state="disabled")
+        rp = updater.repo() if updater else ""
+        if rp:
+            link = tk.Label(body, text="GitHub에서 전체 보기", bg="white", fg="#3b5bdb", cursor="hand2",
+                            font=("맑은 고딕", 9, "underline"))
+            link.pack(anchor="w", pady=(6, 0))
+
+            def open_link(e=None):
+                import webbrowser
+                webbrowser.open("https://github.com/{}/commits/main".format(rp))
+            link.bind("<Button-1>", open_link)
+        status = tk.Label(body, text="", bg="white", fg=MUTED, font=("맑은 고딕", 9))
+        status.pack(fill="x", pady=(8, 0))
+        main_btn = None
+
+        def do_update():
+            main_btn.enabled = False
+            main_btn.config(text="받는 중…", bg="#9a99c9", cursor="watch")
+            later.pack_forget()
+            status.config(text="새 버전을 받고 있습니다. 잠깐만 기다려 주세요.", fg=MUTED)
+            w.update()
+            import threading
+            res = {}
+
+            def work():
+                try:
+                    res["n"] = updater.install(info)
+                except Exception as e:
+                    res["err"] = e
+                    res["tb"] = traceback.format_exc()
+            th = threading.Thread(target=work, daemon=True)
+            th.start()
+
+            def poll():
+                if th.is_alive():
+                    w.after(200, poll)
+                    return
+                if "err" in res:
+                    log("업데이트 실패\n" + res.get("tb", ""))
+                    status.config(text="업데이트하지 못했습니다: {}\n지금 버전은 그대로 쓸 수 있습니다.".format(res["err"]),
+                                  fg="#d93636")
+                    main_btn.enabled = True
+                    main_btn.config(text="다시 시도", bg=NAVY, cursor="hand2")
+                    later.config(text="닫기")
+                    later.pack(pady=(8, 0))
+                    return
+                log("업데이트 {} → {} (파일 {}개)".format(VERSION, info["version"], res["n"]))
+                main_btn.config(text="완료", bg=OK_GREEN, cursor="arrow")
+                status.config(text="{} 버전으로 바꿨습니다. 프로그램을 다시 켭니다…".format(info["version"]), fg=OK_GREEN)
+                w.after(1500, restart)
+            w.after(200, poll)
+
+        def restart():
+            try:
+                import subprocess
+                subprocess.Popen([sys.executable, os.path.join(APP, "main.py")], cwd=os.path.dirname(APP))
+            except Exception:
+                log("다시 켜기 실패\n" + traceback.format_exc())
+                self.notice("다시 켜 주세요", "프로그램을 닫았다가 다시 켜 주세요.")
+                return
+            self.root.destroy()
+
+        main_btn = self._upd_button(body, "지금 업데이트", do_update)
+        main_btn.pack(fill="x", pady=(8, 0))
+        later = self._upd_button(body, "나중에", w.destroy, primary=False)
+        later.pack(pady=(8, 0))
+        w.bind("<Escape>", lambda e: main_btn.enabled and w.destroy())
+        self._upd_center(w)
+        return w
 
     def reconnect(self, create=False):
         self.startup(new_doc=False)
