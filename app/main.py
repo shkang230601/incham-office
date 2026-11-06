@@ -445,7 +445,8 @@ class App:
 
     # --- 업데이트 창 (이음오피스 느낌: 남색 머리 + 로고 + 버전 알약 + 내용 + 큰 버튼) ---
     UPD_W = 380
-    NAVY_LIGHT = "#4b4ab3"
+    HDR_TOP = "#f5f7fe"          # 머리 바탕: 아주 연한 남색 (위 → 아래로 살짝 진하게)
+    HDR_BOT = "#e2e7fa"
 
     def _upd_icon(self, size):
         """로고 아이콘을 size 픽셀 근처로 줄인 그림 (창마다 따로 보관)."""
@@ -478,26 +479,28 @@ class App:
         return w
 
     def _upd_header(self, w, height, title, sub=None, icon=56):
-        """남색 그라데이션 머리: 흰 바탕 둥근 칸 안 로고 + 제목 (+ 버전 알약)."""
+        """연한 바탕 머리: 흰 둥근 칸 안 로고 + 남색 제목 (+ 버전 알약)."""
         W = self.UPD_W
-        cv = tk.Canvas(w, width=W, height=height, highlightthickness=0, bd=0, bg=NAVY)
+        cv = tk.Canvas(w, width=W, height=height, highlightthickness=0, bd=0, bg=self.HDR_BOT)
         cv.pack(fill="x")
-        c1 = tuple(int(NAVY[i:i + 2], 16) for i in (1, 3, 5))
-        c2 = tuple(int(self.NAVY_LIGHT[i:i + 2], 16) for i in (1, 3, 5))
-        for y in range(height):                     # 위는 밝게, 아래로 갈수록 남색
+        c1 = tuple(int(self.HDR_TOP[i:i + 2], 16) for i in (1, 3, 5))
+        c2 = tuple(int(self.HDR_BOT[i:i + 2], 16) for i in (1, 3, 5))
+        for y in range(height):
             t = y / max(1, height - 1)
-            col = "#%02x%02x%02x" % tuple(int(c2[k] + (c1[k] - c2[k]) * t) for k in range(3))
+            col = "#%02x%02x%02x" % tuple(int(c1[k] + (c2[k] - c1[k]) * t) for k in range(3))
             cv.create_line(0, y, W, y, fill=col)
+        cv.create_line(0, height - 1, W, height - 1, fill=LINE)
         top = 18
         if icon:
             tile = icon + 14
             x0 = (W - tile) // 2
+            self._round_rect(cv, x0 + 1, top + 2, x0 + tile + 1, top + tile + 2, 16, fill="#d6dcf3", outline="")   # 옅은 그림자
             self._round_rect(cv, x0, top, x0 + tile, top + tile, 16, fill="white", outline="")
             img = self._upd_icon(icon)
             if img:
                 cv.create_image(W // 2, top + tile // 2, image=img)
             top += tile + 12
-        cv.create_text(W // 2, top + 10, text=title, fill="white", font=uf(15, "b"))
+        cv.create_text(W // 2, top + 10, text=title, fill=NAVY, font=uf(15, "b"))
         if sub:                                     # (지금 버전, 새 버전) 알약
             y = top + 40
             old, new = "v" + sub[0], "v" + sub[1]
@@ -508,12 +511,12 @@ class App:
             wn = tkfont.Font(font=fb).measure(new) + 24
             gap = 30
             x = (W - (wo + gap + wn)) // 2
-            self._round_rect(cv, x, y - 11, x + wo, y + 11, 11, fill="#6564c2", outline="")
-            cv.create_text(x + wo // 2, y, text=old, fill="#e6e6fa", font=fo)
-            cv.create_text(x + wo + gap // 2, y, text="→", fill="white", font=fb)
+            self._round_rect(cv, x, y - 11, x + wo, y + 11, 11, fill="white", outline="")
+            cv.create_text(x + wo // 2, y, text=old, fill=MUTED, font=fo)
+            cv.create_text(x + wo + gap // 2, y, text="→", fill=NAVY, font=fb)
             x2 = x + wo + gap
-            self._round_rect(cv, x2, y - 11, x2 + wn, y + 11, 11, fill="white", outline="")
-            cv.create_text(x2 + wn // 2, y, text=new, fill=NAVY, font=fb)
+            self._round_rect(cv, x2, y - 11, x2 + wn, y + 11, 11, fill=NAVY, outline="")
+            cv.create_text(x2 + wn // 2, y, text=new, fill="white", font=fb)
         return cv
 
     def _upd_button(self, parent, text, cmd, primary=True):
