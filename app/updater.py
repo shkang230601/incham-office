@@ -67,6 +67,17 @@ def newer(info):
     return bool(info) and vtuple(info["version"]) > vtuple(current_version())
 
 
+def _release_font(path):
+    """이 프로그램이 불러 둔 글꼴 파일을 놓아 줌 (그래야 새 파일로 바꿀 수 있음)."""
+    try:
+        import ctypes
+        for _ in range(4):
+            if not ctypes.windll.gdi32.RemoveFontResourceExW(path, 0x10, 0):
+                break
+    except Exception:
+        pass
+
+
 def install(info, timeout=60):
     """app.zip 을 받아 app 폴더에 덮어씀. 바뀐 파일 수를 돌려줌. 문제가 있으면 예외."""
     raw = _get(info["url"], timeout, "application/octet-stream")
@@ -80,17 +91,41 @@ def install(info, timeout=60):
         raise RuntimeError("받은 파일에 프로그램(main.py)이 없습니다.")
     backup = os.path.join(APP, "_backup", current_version())
     count = 0
+    later = []                                  # 쓰지 못한 파일 (다른 프로그램이 붙잡고 있는 경우)
+    items = []
     for n in names:
         rel = n[len(prefix):]
         if not rel or rel.split("/")[0] in KEEP or ".." in rel.split("/"):
             continue
+        items.append((n, rel))
+    items.sort(key=lambda t: t[1] == "VERSION.txt")     # 버전 파일은 맨 마지막에 (중간에 실패하면 버전이 안 바뀜)
+    for n, rel in items:
         dst = os.path.join(APP, *rel.split("/"))
+        data = zf.read(n)
         if os.path.exists(dst):
+            try:
+                with open(dst, "rb") as f:
+                    if f.read() == data:        # 같은 파일은 건드리지 않음 (쓰는 중인 글꼴 등)
+                        continue
+            except Exception:
+                pass
             b = os.path.join(backup, *rel.split("/"))
             os.makedirs(os.path.dirname(b), exist_ok=True)
-            shutil.copy2(dst, b)
+            try:
+                shutil.copy2(dst, b)
+            except Exception:
+                pass
+            if dst.lower().endswith((".ttf", ".otf")):
+                _release_font(dst)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with zf.open(n) as src, open(dst, "wb") as out:
-            shutil.copyfileobj(src, out)
+        try:
+            with open(dst, "wb") as out:
+                out.write(data)
+        except PermissionError:
+            if rel.endswith((".py", ".txt", ".json")) and rel != "log.txt":
+                raise
+            later.append(rel)                   # 글꼴·그림 등은 다음에 켤 때 받아도 됨
+            continue
         count += 1
+    install.skipped = later
     return count
