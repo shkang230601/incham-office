@@ -983,7 +983,7 @@ class Hwp:
 
     @staticmethod
     def _intl(phone):
-        """032-810-2836 → +82-32-810-2836"""
+        """032-810-0000 → +82-32-810-0000"""
         p = phone.strip()
         return "+82-" + p[1:] if p.startswith("0") else p
 

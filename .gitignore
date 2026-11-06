@@ -3,3 +3,4 @@ __pycache__/
 app/log.txt
 app/_backup/
 python/
+_build/
