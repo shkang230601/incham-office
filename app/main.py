@@ -226,6 +226,69 @@ def make_shortcut():
         log("바로가기 생성 실패\n" + traceback.format_exc())
 
 
+
+class RoundButton(tk.Canvas):
+    """모서리가 둥근 넓은 버튼. config(text=, bg=, cursor=) 로 상태(받는 중·완료·다시 시도)를 바꿈."""
+
+    def __init__(self, parent, text, cmd, bg=None, fg="white", height=46, radius=16):
+        super().__init__(parent, height=height, highlightthickness=0, bd=0, bg=parent.cget("bg"), cursor="hand2")
+        self._text, self._bg, self._fg, self._r, self._cmd = text, bg or NAVY, fg, radius, cmd
+        self._hover = False
+        self.enabled = True
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Button-1>", lambda e: self.enabled and self._cmd())
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+
+    def _set_hover(self, on):
+        self._hover = on
+        self._draw()
+
+    @staticmethod
+    def _lighter(col, k=0.14):
+        c = [int(col[i:i + 2], 16) for i in (1, 3, 5)]
+        return "#%02x%02x%02x" % tuple(int(v + (255 - v) * k) for v in c)
+
+    def _draw(self):
+        self.delete("all")
+        w, h, r = self.winfo_width(), int(self.cget("height")), self._r
+        if w < 4:
+            return
+        col = self._lighter(self._bg) if (self._hover and self.enabled) else self._bg
+        App._round_rect(self, 0, 0, w - 1, h - 1, r, fill=col, outline="")
+        self.create_text(w // 2, h // 2, text=self._text, fill=self._fg, font=uf(11, "b"))
+
+    def config(self, **kw):
+        if "text" in kw:
+            self._text = kw.pop("text")
+        if "bg" in kw:
+            self._bg = kw.pop("bg")
+        if kw:
+            super().config(**kw)
+        self._draw()
+    configure = config
+
+
+class RoundBox(tk.Canvas):
+    """모서리가 둥근 상자. 안에 넣을 것은 .inner 프레임에."""
+
+    def __init__(self, parent, height, fill, outline, radius=12, pad=8):
+        super().__init__(parent, height=height, highlightthickness=0, bd=0, bg=parent.cget("bg"))
+        self._fill, self._outline, self._r, self._pad = fill, outline, radius, pad
+        self.inner = tk.Frame(self, bg=fill)
+        self._win = self.create_window(pad, pad, window=self.inner, anchor="nw")
+        self.bind("<Configure>", lambda e: self._draw())
+
+    def _draw(self):
+        w, h, p = self.winfo_width(), int(self.cget("height")), self._pad
+        self.delete("box")
+        if w < 4:
+            return
+        App._round_rect(self, 1, 1, w - 2, h - 2, self._r, fill=self._fill, outline=self._outline, tags="box")
+        self.tag_lower("box")
+        self.itemconfig(self._win, width=w - 2 * p, height=h - 2 * p)
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -460,10 +523,22 @@ class App:
             return None
 
     @staticmethod
-    def _round_rect(cv, x1, y1, x2, y2, r, **kw):
-        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2,
-               x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-        return cv.create_polygon(pts, smooth=True, **kw)
+    def _round_rect(cv, x1, y1, x2, y2, r, fill="", outline="", tags=None, **kw):
+        """정확한 둥근 사각형 (네 모서리 원호 + 가운데 사각형). outline 이 있으면 테두리도 원호로."""
+        r = max(1, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
+        t = {"tags": tags} if tags else {}
+        if fill:
+            for ax, ay, st in ((x1, y1, 90), (x2 - 2 * r, y1, 0), (x1, y2 - 2 * r, 180), (x2 - 2 * r, y2 - 2 * r, 270)):
+                cv.create_arc(ax, ay, ax + 2 * r, ay + 2 * r, start=st, extent=90, fill=fill, outline=fill, **t)
+            cv.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline=fill, **t)
+            cv.create_rectangle(x1, y1 + r, x2, y2 - r, fill=fill, outline=fill, **t)
+        if outline:
+            for ax, ay, st in ((x1, y1, 90), (x2 - 2 * r, y1, 0), (x1, y2 - 2 * r, 180), (x2 - 2 * r, y2 - 2 * r, 270)):
+                cv.create_arc(ax, ay, ax + 2 * r, ay + 2 * r, start=st, extent=90, style="arc", outline=outline, **t)
+            cv.create_line(x1 + r, y1, x2 - r, y1, fill=outline, **t)
+            cv.create_line(x1 + r, y2, x2 - r, y2, fill=outline, **t)
+            cv.create_line(x1, y1 + r, x1, y2 - r, fill=outline, **t)
+            cv.create_line(x2, y1 + r, x2, y2 - r, fill=outline, **t)
 
     def _upd_window(self, title):
         w = tk.Toplevel(self.root)
@@ -520,21 +595,13 @@ class App:
         return cv
 
     def _upd_button(self, parent, text, cmd, primary=True):
-        """둥근 느낌의 넓은 버튼 (Label로 그려 테두리 없이)."""
-        bg, fg, hov = (NAVY, "white", NAVY_HOVER) if primary else ("white", MUTED, "white")
-        b = tk.Label(parent, text=text, bg=bg, fg=fg, cursor="hand2",
-                     font=uf(11, "b") if primary else uf(9, "r", True),
-                     pady=10 if primary else 2)
-        b.enabled = True
-
-        def click(e=None):
-            if b.enabled:
-                cmd()
-        b.bind("<Button-1>", click)
-        if primary:
-            b.bind("<Enter>", lambda e: b.enabled and b.config(bg=hov))
-            b.bind("<Leave>", lambda e: b.enabled and b.config(bg=bg))
-        return b
+        """주요 버튼은 모서리가 둥근 남색 버튼(캔버스로 그림), 보조 버튼은 밑줄 글자."""
+        if not primary:
+            b = tk.Label(parent, text=text, bg="white", fg=MUTED, cursor="hand2", font=uf(9, "r", True), pady=2)
+            b.enabled = True
+            b.bind("<Button-1>", lambda e: b.enabled and cmd())
+            return b
+        return RoundButton(parent, text, cmd)
 
     def _upd_center(self, w):
         w.update_idletasks()
@@ -567,14 +634,14 @@ class App:
         body = tk.Frame(w, bg="white", padx=20, pady=14)
         body.pack(fill="both", expand=True)
         tk.Label(body, text="업데이트 내용", bg="white", fg=MUTED, font=uf(9, "s")).pack(anchor="w", pady=(0, 6))
-        box = tk.Frame(body, bg="#f7f9fc", highlightthickness=1, highlightbackground=LINE)
-        box.pack(fill="both", expand=True)
-        txt = tk.Text(box, height=9, width=30, wrap="word", bd=0, bg="#f7f9fc", fg=TEXT,
+        box = RoundBox(body, height=196, fill="#f7f9fc", outline=LINE, radius=16, pad=10)
+        box.pack(fill="x")
+        txt = tk.Text(box.inner, height=9, width=30, wrap="word", bd=0, highlightthickness=0, relief="flat", bg="#f7f9fc", fg=TEXT,
                       font=uf(10), padx=12, pady=10, spacing1=2, spacing3=3, cursor="arrow")
-        sb = ttk.Scrollbar(box, orient="vertical", command=txt.yview)
+        sb = ttk.Scrollbar(box.inner, orient="vertical", command=txt.yview)
         txt.configure(yscrollcommand=sb.set)
         txt.pack(side="left", fill="both", expand=True)
-        sb.pack(side="left", fill="y")
+        sb.pack(side="left", fill="y", pady=4)
         txt.tag_configure("b", font=uf(10, "b"), spacing1=6)
         txt.tag_configure("li", lmargin1=6, lmargin2=20)
         notes = (info.get("notes") or "").strip() or "자잘한 부분을 고쳤습니다."
