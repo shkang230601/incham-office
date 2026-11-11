@@ -34,4 +34,6 @@
 - 파이썬 폴더(`python/`)는 저장소에 넣지 않는다(.gitignore). 업데이트는 app 폴더만 바꾼다.
   - 파이썬에 `_ssl.pyd`, `libssl-3-x64.dll`, `libcrypto-3-x64.dll` 이 DLLs 에 있어야 https(업데이트)가 된다.
 - 사용자 데이터(내 정보·내 서식·최근 기호)는 `%APPDATA%` 에 있어 업데이트와 무관.
+- PC의 파이썬에는 openpyxl이 없다 → `app/vendor/`(openpyxl, et_xmlfile)에 넣어 두고 main.py가 sys.path 에 추가함 (3.3부터).
+- device_commit_files 는 같은 stagedPath 를 다시 쓰면 옛 내용이 갈 때가 있음 → 매번 새 폴더/이름으로 올린다.
 - 3.1 배포 시점에 사용자 PC는 시험 때문에 3.1.1 로 표시됨(내용은 3.1과 같음) → 다음 정식 버전은 3.2 이상.
