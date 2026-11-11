@@ -8,6 +8,7 @@ import traceback
 import datetime
 
 APP = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(APP, "vendor"))   # 함께 넣은 부품 (엑셀 읽기·쓰기: openpyxl)
 PY = os.path.dirname(sys.executable)
 LOG = os.path.join(APP, "log.txt")
 
@@ -540,7 +541,7 @@ class App:
             cv.create_line(x1, y1 + r, x1, y2 - r, fill=outline, **t)
             cv.create_line(x2, y1 + r, x2, y2 - r, fill=outline, **t)
 
-    def _upd_window(self, title):
+    def _upd_window(self, title, parent=None):
         w = tk.Toplevel(self.root)
         w.title(title)
         w.configure(bg="white")
@@ -550,12 +551,15 @@ class App:
             w.iconbitmap(os.path.join(APP, "assets", "icon_kcci.ico"))
         except Exception:
             pass
-        w.transient(self.root)
+        try:
+            w.transient(parent or self.root)
+        except Exception:
+            w.transient(self.root)
         return w
 
-    def _upd_header(self, w, height, title, sub=None, icon=56):
+    def _upd_header(self, w, height, title, sub=None, icon=56, W=None):
         """연한 바탕 머리: 흰 둥근 칸 안 로고 + 남색 제목 (+ 버전 알약)."""
-        W = self.UPD_W
+        W = W or self.UPD_W
         cv = tk.Canvas(w, width=W, height=height, highlightthickness=0, bd=0, bg=self.HDR_BOT)
         cv.pack(fill="x")
         c1 = tuple(int(self.HDR_TOP[i:i + 2], 16) for i in (1, 3, 5))
@@ -603,29 +607,93 @@ class App:
             return b
         return RoundButton(parent, text, cmd)
 
-    def _upd_center(self, w):
+    def _upd_center(self, w, W=None, parent=None):
         w.update_idletasks()
-        W, H = self.UPD_W, w.winfo_reqheight()      # 너비는 머리 그림과 같게 고정 (내용은 그 안에서 줄바꿈)
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - W) // 2
-        y = self.root.winfo_rooty() + 80
+        W, H = W or self.UPD_W, w.winfo_reqheight()     # 너비는 머리 그림과 같게 고정 (내용은 그 안에서 줄바꿈)
+        base = parent if (parent is not None and parent.winfo_exists() and parent.winfo_viewable()) else self.root
+        x = base.winfo_rootx() + (base.winfo_width() - W) // 2
+        y = base.winfo_rooty() + (80 if base is self.root else max(20, (base.winfo_height() - H) // 3))
         w.geometry("{}x{}+{}+{}".format(W, H, max(0, x), max(0, y)))
         w.lift()
         w.focus_force()
 
-    def notice(self, title, msg, ok=True):
-        """작은 안내 창 — 업데이트 창과 같은 모양 (남색 머리 + 로고 + 한두 줄 + 확인)."""
-        w = self._upd_window(TITLE)
-        self._upd_header(w, 112, title, icon=40)
+    def notice(self, title, msg, ok=True, parent=None, wait=False):
+        """작은 안내 창 — 업데이트 창과 같은 모양 (연한 머리 + 로고 + 내용 + 확인).
+        wait=True 이면 닫을 때까지 기다림 (예전 메시지 상자처럼)."""
+        msg = str(msg or "")
+        lines = msg.splitlines() or [""]
+        long_text = len(lines) > 3 or len(msg) > 90
+        W = self.UPD_W
+        if long_text:                                   # 긴 글은 왼쪽 맞춤 + 필요하면 창을 넓힘
+            import tkinter.font as tkfont
+            fnt = tkfont.Font(font=uf(10))
+            W = max(W, min(640, max(fnt.measure(l) for l in lines) + 90))
+        w = self._upd_window(TITLE, parent)
+        self._upd_header(w, 112, title, icon=40, W=W)
         body = tk.Frame(w, bg="white", padx=24, pady=16)
         body.pack(fill="both")
         tk.Label(body, text=msg, bg="white", fg=TEXT if ok else "#d93636", font=uf(10),
-                 justify="center", wraplength=self.UPD_W - 48).pack(pady=(0, 14))
+                 justify="left" if long_text else "center", anchor="w" if long_text else "center",
+                 wraplength=W - 48).pack(fill="x", pady=(0, 14))
         btn = self._upd_button(body, "확인", w.destroy)
         btn.pack(fill="x")
         w.bind("<Return>", lambda e: w.destroy())
         w.bind("<Escape>", lambda e: w.destroy())
-        self._upd_center(w)
+        self._upd_center(w, W, parent)
+        if wait:
+            try:
+                w.grab_set()
+            except Exception:
+                pass
+            w.wait_window()
         return w
+
+    def ask(self, title, msg, parent=None, yes="예", no="아니요"):
+        """예/아니요 확인 창 (같은 모양). 예 → True"""
+        res = {"v": False}
+        w = self._upd_window(TITLE, parent)
+        self._upd_header(w, 112, title, icon=40)
+        body = tk.Frame(w, bg="white", padx=24, pady=16)
+        body.pack(fill="both")
+        tk.Label(body, text=str(msg or ""), bg="white", fg=TEXT, font=uf(10), justify="center",
+                 wraplength=self.UPD_W - 48).pack(pady=(0, 14))
+
+        def done(v):
+            res["v"] = v
+            w.destroy()
+        self._upd_button(body, yes, lambda: done(True)).pack(fill="x")
+        self._upd_button(body, no, lambda: done(False), primary=False).pack(pady=(8, 0))
+        w.bind("<Return>", lambda e: done(True))
+        w.bind("<Escape>", lambda e: done(False))
+        self._upd_center(w, None, parent)
+        try:
+            w.grab_set()
+        except Exception:
+            pass
+        w.wait_window()
+        return res["v"]
+
+    def use_styled_messages(self):
+        """프로그램의 모든 메시지 상자(안내·오류·예/아니요)를 같은 모양의 창으로 바꿈."""
+        def head(title, default):
+            t = (title or "").strip()
+            return default if (not t or t == TITLE) else t
+
+        def info(title=None, message=None, **kw):
+            self.notice(head(title, "안내"), message, parent=kw.get("parent"), wait=True)
+            return "ok"
+
+        def error(title=None, message=None, **kw):
+            self.notice(head(title, "확인해 주세요"), message, ok=False, parent=kw.get("parent"), wait=True)
+            return "ok"
+
+        def yesno(title=None, message=None, **kw):
+            return self.ask(head(title, "확인"), message, parent=kw.get("parent"))
+
+        messagebox.showinfo = info
+        messagebox.showwarning = info
+        messagebox.showerror = error
+        messagebox.askyesno = yesno
 
     def ask_update(self, info):
         """새 버전 안내 창. [지금 업데이트] → 받는 중 → 바꿈 → 다시 켜기 (모두 이 창 안에서)."""
@@ -2174,26 +2242,130 @@ class App:
         win = self.popup("수료증 만들기")
         pad = {"padx": 2, "pady": 3}
         tk.Label(win, text="① 수강생 명단", font=FONT_B, fg=NAVY, bg="white").grid(row=0, column=0, columnspan=2, sticky="w", **pad)
-        tk.Label(win, text="엑셀에서 소속 · 직급 · 성명 세 칸을 복사해 아래에 붙여 넣거나 [엑셀 불러오기]를 누르세요 (머리줄은 있어도 됨)",
+        tk.Label(win, text="칸에 직접 쓰거나, 엑셀에서 세 칸을 복사해 첫 칸에 붙여 넣거나, [엑셀 불러오기]를 누르세요",
                  font=FONT_S, fg=MUTED, bg="white").grid(row=1, column=0, columnspan=2, sticky="w")
-        txt = tk.Text(win, width=60, height=10, font=FONT, relief="solid", bd=1)
-        txt.grid(row=2, column=0, columnspan=2, pady=4)
-        count = tk.Label(win, text="인원: 0명", font=FONT_B, bg="white", fg="#1a7f37")
-        count.grid(row=3, column=0, sticky="w")
+
+        # 명단 표 (소속 · 직급 · 성명) — 스크롤
+        box = tk.Frame(win, bg="white", relief="solid", bd=1)
+        box.grid(row=2, column=0, columnspan=2, sticky="we", pady=4)
+        COLS = (("소속", 30), ("직급", 12), ("성명", 12))
+        head = tk.Frame(box, bg="#eef1fa")
+        head.pack(fill="x")
+        for j, (label, _w) in enumerate(COLS):
+            tk.Label(head, text=label, bg="#eef1fa", font=FONT_B, anchor="w").grid(row=0, column=j + 1, sticky="w", padx=1, pady=2)
+        body = tk.Frame(box, bg="white")
+        body.pack(fill="both")
+        cv = tk.Canvas(body, bg="white", height=230, highlightthickness=0, width=10)
+        sb = tk.Scrollbar(body, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg="white")
+        inner.bind("<Configure>", lambda _e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        def wheel(ev):
+            cv.yview_scroll(-1 if ev.delta > 0 else 1, "units")
+        cv.bind("<MouseWheel>", wheel)
+        inner.bind("<MouseWheel>", wheel)
+
+        rows = []                                   # [[소속 Entry, 직급 Entry, 성명 Entry], ...]
+        bar = tk.Frame(win, bg="white")
+        bar.grid(row=3, column=0, columnspan=2, sticky="we")
+        count = tk.Label(bar, text="인원: 0명", font=FONT_B, bg="white", fg="#1a7f37")
+        count.pack(side="left")
         state = {"people": []}
 
         def refresh(_e=None):
-            state["people"] = logic.parse_roster_text(txt.get("1.0", "end"))
-            count.config(text="인원: {}명".format(len(state["people"])))
+            people = []
+            for r in rows:
+                org, rank, name = (c.get().strip() for c in r)
+                if name:
+                    people.append([org, rank, name])
+            state["people"] = people
+            count.config(text="인원: {}명".format(len(people)))
 
-        txt.bind("<KeyRelease>", refresh)
+        def add_row():
+            i = len(rows)
+            tk.Label(inner, text=str(i + 1), width=3, bg="white", fg=MUTED, font=FONT_S).grid(row=i, column=0)
+            cells = []
+            for j, (_label, wdt) in enumerate(COLS):
+                en = tk.Entry(inner, font=FONT, width=wdt + 2, relief="solid", bd=1)
+                en.grid(row=i, column=j + 1, padx=1, pady=1, sticky="w")
+                en.bind("<KeyRelease>", refresh)
+                en.bind("<Return>", lambda _e, i=i, j=j: go(i + 1, j))
+                en.bind("<Down>", lambda _e, i=i, j=j: go(i + 1, j))
+                en.bind("<Up>", lambda _e, i=i, j=j: go(i - 1, j))
+                en.bind("<FocusIn>", lambda _e, i=i: (len(rows) - 1 == i) and add_row())   # 마지막 줄이면 한 줄 늘림
+                en.bind("<<Paste>>", lambda _e, i=i, j=j: paste(i, j))
+                en.bind("<MouseWheel>", wheel)
+                cells.append(en)
+            rows.append(cells)
+            return cells
 
-        def poll():
-            if win.winfo_exists():
-                refresh()
-                win.after(700, poll)
+        def go(i, j):
+            if i < 0:
+                return "break"
+            while i >= len(rows):
+                add_row()
+            rows[i][j].focus_set()
+            inner.update_idletasks()
+            # 보이게 스크롤
+            y = rows[i][j].winfo_y()
+            h = max(inner.winfo_height(), 1)
+            cv.yview_moveto(max(0, (y - 100) / h))
+            return "break"
 
-        win.after(700, poll)
+        def fill(start_i, start_j, data):
+            """data: [[...], ...] 를 (start_i, start_j)부터 채움"""
+            for di, vals in enumerate(data):
+                i = start_i + di
+                while i >= len(rows):
+                    add_row()
+                for dj, v in enumerate(vals):
+                    j = start_j + dj
+                    if j > 2:
+                        break
+                    rows[i][j].delete(0, "end")
+                    rows[i][j].insert(0, v)
+            if len(rows) <= start_i + len(data):
+                add_row()
+            refresh()
+
+        def paste(i, j):
+            try:
+                clip = win.clipboard_get()
+            except Exception:
+                return None
+            if "\t" not in clip and "\n" not in clip.strip("\r\n"):
+                return None                           # 한 칸짜리는 보통 붙여 넣기
+            data = []
+            for line in clip.replace("\r\n", "\n").rstrip("\n").split("\n"):
+                cells = [c.strip() for c in line.split("\t")]
+                if any(c in logic._HEADER_WORDS for c in cells):
+                    continue                          # 머리줄 건너뜀
+                if not any(cells):
+                    continue
+                data.append(cells)
+            fill(i, j, data)
+            return "break"
+
+        def clear_all():
+            for r in rows:
+                for c in r:
+                    c.delete(0, "end")
+            cv.yview_moveto(0)
+            refresh()
+
+        for _ in range(10):
+            add_row()
+        # 머리줄 칸 너비를 입력 칸에 맞추고, 표가 다 보이게 너비 지정
+        inner.update_idletasks()
+        num_w = inner.grid_bbox(0, 0)[2]
+        head.grid_columnconfigure(0, minsize=num_w)
+        for j in range(3):
+            head.grid_columnconfigure(j + 1, minsize=rows[0][j].winfo_reqwidth() + 2)
+        cv.configure(width=inner.winfo_reqwidth())
 
         def pick_excel():
             path = filedialog.askopenfilename(parent=win, title="명단 엑셀 불러오기", filetypes=[("엑셀 파일", "*.xlsx *.xlsm")])
@@ -2202,61 +2374,111 @@ class App:
             try:
                 import openpyxl
                 wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-                rows = [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+                data = [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
                 wb.close()
-                people = logic.parse_roster_rows(rows)
-                txt.delete("1.0", "end")
-                txt.insert("1.0", "\n".join("\t".join(p) for p in people))
-                refresh()
+                people = logic.parse_roster_rows(data)
+                clear_all()
+                fill(0, 0, people)
             except Exception:
                 log("엑셀 읽기 오류\n" + traceback.format_exc())
                 messagebox.showerror("수료증 만들기", "엑셀 파일을 읽지 못했습니다. (.xls는 .xlsx로 저장해서 골라주세요)", parent=win)
 
-        tk.Button(win, text="엑셀 불러오기", font=FONT, relief="groove", bg="white",
-                  command=pick_excel).grid(row=3, column=1, sticky="e")
+        def get_template():
+            try:
+                folder = hwpctl.Hwp._docs_dir()
+                path = os.path.join(folder, "수료증_명단양식.xlsx")
+                if not os.path.exists(path):
+                    logic.cert_excel_template(path)
+                os.startfile(path)
+            except Exception:
+                log("명단 양식 오류\n" + traceback.format_exc())
+                messagebox.showerror("수료증 만들기", "엑셀 양식을 만들지 못했습니다.", parent=win)
+
+        for label, fn in (("모두 지우기", clear_all), ("엑셀 불러오기", pick_excel), ("엑셀 양식 받기", get_template)):
+            tk.Button(bar, text=label, font=FONT, relief="groove", bg="white", command=fn).pack(side="right", padx=2)
+
+        # ② 교육 정보
         tk.Label(win, text="② 교육 정보 (모두 같은 값)", font=FONT_B, fg=NAVY, bg="white").grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 3))
-        entries = {}
         today = datetime.date.today()
-        fields = [("과정명", ""), ("수강기간", "{} 14:00~17:00 (3H)".format(logic.date_fmt(today, "dotw"))),
-                  ("교육구분", "오프라인 교육"), ("발급일", logic.cert_date_text(today)), ("시작 번호", "{}-001".format(today.year))]
-        for i, (label, default) in enumerate(fields):
-            tk.Label(win, text=label, font=FONT, bg="white", width=9, anchor="w").grid(row=5 + i, column=0, sticky="w", pady=2)
-            e = tk.Entry(win, font=FONT, width=48, relief="solid", bd=1)
+
+        def lab(r, text):
+            tk.Label(win, text=text, font=FONT, bg="white", width=9, anchor="w").grid(row=r, column=0, sticky="w", pady=2)
+
+        def ent(parent, default, width):
+            e = tk.Entry(parent, font=FONT, width=width, relief="solid", bd=1)
             e.insert(0, default)
-            e.grid(row=5 + i, column=1, sticky="w", pady=2)
-            entries[label] = e
-        tk.Label(win, text="시작 번호 예: 2026-303 → 다음 사람부터 2026-304, 2026-305 …", font=FONT_S, fg=MUTED,
-                 bg="white").grid(row=10, column=0, columnspan=2, sticky="w")
+            return e
+
+        lab(5, "과정명")
+        e_course = ent(win, "", 48)
+        e_course.grid(row=5, column=1, sticky="w", pady=2)
+
+        lab(6, "교육일 · 시간")
+        tline = tk.Frame(win, bg="white")
+        tline.grid(row=6, column=1, sticky="w", pady=2)
+        e_day = ent(tline, logic.date_fmt(today, "dot"), 14)
+        e_day.pack(side="left")
+        e_from = ent(tline, "14:00", 6)
+        e_from.pack(side="left", padx=(8, 0))
+        tk.Label(tline, text="~", font=FONT, bg="white").pack(side="left", padx=2)
+        e_to = ent(tline, "17:00", 6)
+        e_to.pack(side="left")
+        tk.Label(tline, text="  점심(12~13시)은 빼고 계산", font=FONT_S, fg=MUTED, bg="white").pack(side="left")
+
+        lab(7, "수강기간")
+        e_period = ent(win, "", 48)
+        e_period.grid(row=7, column=1, sticky="w", pady=2)
+
+        def period_update(_e=None):
+            txt = logic.cert_period_text(e_day.get(), e_from.get(), e_to.get())
+            if txt:
+                e_period.delete(0, "end")
+                e_period.insert(0, txt)
+        for e in (e_day, e_from, e_to):
+            e.bind("<KeyRelease>", period_update)
+        period_update()
+
+        lab(8, "교육구분")
+        e_kind = ent(win, "오프라인 교육", 48)
+        e_kind.grid(row=8, column=1, sticky="w", pady=2)
+        lab(9, "발급일")
+        e_issue = ent(win, logic.date_fmt(today, "dot"), 48)
+        e_issue.grid(row=9, column=1, sticky="w", pady=2)
+        lab(10, "시작 번호")
+        e_no = ent(win, "{}-001".format(today.year), 48)
+        e_no.grid(row=10, column=1, sticky="w", pady=2)
+        tk.Label(win, text="시작 번호 예: 2026-303 → 다음 사람부터 2026-304, 2026-305 …  (숫자만 쓰면 올해 연도)", font=FONT_S, fg=MUTED,
+                 bg="white").grid(row=11, column=0, columnspan=2, sticky="w")
 
         def make():
             refresh()
             people = state["people"]
             if not people:
-                messagebox.showinfo("수료증 만들기", "명단을 먼저 넣어 주세요.", parent=win)
+                messagebox.showinfo("수료증 만들기", "명단을 먼저 넣어 주세요. (성명 칸이 빈 줄은 빠집니다)", parent=win)
                 return
-            vals = {k: e.get().strip() for k, e in entries.items()}
-            if not vals["과정명"]:
+            course = e_course.get().strip()
+            if not course:
                 messagebox.showinfo("수료증 만들기", "과정명을 입력해 주세요.", parent=win)
                 return
             try:
-                numbers = logic.cert_numbers(vals["시작 번호"], len(people))
+                numbers = logic.cert_numbers(e_no.get(), len(people))
             except ValueError as err:
                 messagebox.showinfo("수료증 만들기", str(err), parent=win)
                 return
-            common = {k: vals[k] for k in ("과정명", "수강기간", "교육구분", "발급일")}
+            common = {"과정명": course, "수강기간": e_period.get().strip(), "교육구분": e_kind.get().strip(),
+                      "발급일": logic.cert_date_norm(e_issue.get())}
             res = self.call(lambda: self.hwp.do_make_certs(os.path.join(FORMS, "cert.hwp"), people, common, numbers),
                             "수료증 만들기", parent=win)
             if res:
                 dst, missing = res
                 log("수료증: {}명 → {}".format(len(people), dst))
-                msg = "{}명의 수료증을 만들었습니다.\n\n저장 위치: {}".format(len(people), dst)
+                msg = "{}명의 수료증을 만들었습니다.\n고칠 곳이 있으면 바꿔서 다시 만드세요.".format(len(people))
                 if missing:
                     msg += "\n\n※ 양식에서 찾지 못해 채우지 않은 칸: " + ", ".join(missing)
-                messagebox.showinfo("수료증 만들기", msg, parent=win)
-                win.destroy()
+                self.notice("수료증을 만들었습니다", msg, parent=win)
 
         btns = tk.Frame(win, bg="white")
-        btns.grid(row=11, column=0, columnspan=2, sticky="e", pady=10)
+        btns.grid(row=12, column=0, columnspan=2, sticky="e", pady=10)
         tk.Button(btns, text="닫기", font=FONT, relief="groove", bg="white", width=8, command=win.destroy).pack(side="left", padx=4)
         tk.Button(btns, text="만들기", font=FONT_B, relief="flat", bg=NAVY, fg="white", width=10, command=make).pack(side="left", padx=4)
 
@@ -2272,6 +2494,7 @@ def main():
     root = tk.Tk()
     load_ui_fonts(root)
     app = App(root)
+    app.use_styled_messages()                # 안내·오류 창을 모두 같은 모양으로
     root.after(3000, app.check_update)       # 켜고 3초 뒤 조용히 새 버전 확인
     root.mainloop()
 

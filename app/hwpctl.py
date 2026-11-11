@@ -334,7 +334,7 @@ class Hwp:
         return go(rest)
 
     def para_shape(self, line_spacing=None, align=None, indent=None, left=None,
-                   prev=None, nxt=None, break_char=None, condense=None):
+                   prev=None, nxt=None, break_char=None, condense=None, line_wrap=None):
         """align: 0 양쪽, 1 왼쪽, 2 오른쪽, 3 가운데 / prev·nxt·left는 pt"""
         h = self.h
         p = h.HParameterSet.HParaShape
@@ -356,6 +356,8 @@ class Hwp:
             p.BreakNonLatinWord = break_char
         if condense is not None:
             p.Condense = condense
+        if line_wrap is not None:               # 0 보통, 1 한 줄로 입력(글자 폭을 줄여 한 줄 유지), 2 줄 안 나눔
+            p.HSet.SetItem("LineWrap", line_wrap)
         h.HAction.Execute("ParagraphShape", p.HSet)
 
     def select_para(self):
@@ -944,6 +946,15 @@ class Hwp:
         self.replace_all("(신명조 12 포인트 진하게)", "")
         self.replace_all("(신명조 12 포인트)", "")
         self.fill_me("letter_" + lang)
+        if lang == "ko":                                # 본문 2항 끝에 커서 (1항은 인사말)
+            try:
+                self.move(2)
+                if self.find("무궁한 발전을 기원합니다."):   # 날짜 "12. "와 헷갈리지 않게 1항을 찾고 다음 줄로
+                    self.run("Cancel")
+                    self.run("MoveNextParaBegin")
+                    self.run("MoveParaEnd")
+            except Exception:
+                pass
         return dst
 
     def replace_sure(self, find, rep, pattern=None):
@@ -1515,7 +1526,7 @@ class Hwp:
         return dst
 
     # ---------- 수료증 ----------
-    def _insert_file(self, path):
+    def _insert_file(self, path, keep_section=1):
         h = self.h
         p = h.HParameterSet.HInsertFile
         h.HAction.GetDefault("InsertFile", p.HSet)
@@ -1527,40 +1538,94 @@ class Hwp:
                 continue
         for key in ("KeepSection", "KeepCharshape", "KeepParashape", "KeepStyle"):
             try:
-                setattr(p, key, 1)
+                setattr(p, key, keep_section if key == "KeepSection" else 1)
             except Exception:
                 pass
         h.HAction.Execute("InsertFile", p.HSet)
 
     def do_make_certs(self, template, people, common, numbers):
+        """numbers: [(연도, 일련번호), ...] — logic.cert_numbers"""
         h = self.h
         work = self._docs_dir()
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         tmp = os.path.join(work, "_수료증_틀_{}.hwp".format(stamp))
         shutil.copyfile(template, tmp)
         self.run("FileNew")
+        blank = h.XHwpDocuments.Active_XHwpDocument
         h.Open(tmp, "HWP", "forceopen:true")
+        try:                                            # 틀이 새 창으로 열렸으면 방금 만든 빈 문서는 닫음
+            cur = h.XHwpDocuments.Active_XHwpDocument
+            if cur.DocumentID != blank.DocumentID:
+                blank.Close(False)
+                cur.SetActive_XHwpDocument()
+        except Exception:
+            pass
         missing = []
+        # 번호: "제2026 - 303호" (사이가 고정폭 빈칸이라 통째로는 못 찾음) → 연도·일련번호 칸을 따로
+        if self.find_from_top(logic.CERT_NO_YEAR):
+            self.run("Cancel")                          # 커서를 찾은 글자 끝으로
+            for _ in range(4):
+                self.run("MoveSelLeft")                 # 뒤 4자리(연도)만 선택
+            self.run("Delete")
+            h.CreateField("연도", "", "연도")
+        else:
+            missing.append("번호(연도)")
+        if self.find_from_top(logic.CERT_NO_SERIAL):
+            self.run("Delete")
+            h.CreateField("번호", "", "번호")
+        else:
+            missing.append("번호")
         for field, sample in logic.CERT_SAMPLES:
             if self.find_from_top(sample):
                 self.run("Delete")
                 h.CreateField(field, "", field)
+                if field in ("수강기간", "발급일"):
+                    try:
+                        self.para_shape(line_wrap=1)    # 길어져도 두 줄로 넘어가지 않게 '한 줄로 입력'
+                    except Exception:
+                        trace("한 줄로 입력 설정 실패: " + field)
             else:
                 missing.append(field)
         h.SaveAs(tmp, "HWP", "")
-        self.runs("SelectAll", "Delete")
-        for i in range(len(people)):
-            if i > 0:
-                self.move(3)
-                self.run("BreakPage")
+        # 칸을 만든 틀은 닫고 새 문서에 사람 수만큼 끼워 넣음
+        #  - 열어 둔 파일 자신은 다시 끼워 넣지 못하고, 틀 문서의 표는 '모두 선택 → 지우기'로 지워지지 않음
+        #  - 첫 장은 쪽 설정(구역)째 넣고, 그 앞에 생기는 빈 쪽은 지움. 둘째 장부터는 쪽 나누기 + 내용만
+        tdoc = h.XHwpDocuments.Active_XHwpDocument
+        self.run("FileNew")
+        out = h.XHwpDocuments.Active_XHwpDocument
+        try:
+            tdoc.Close(False)
+        except Exception:
+            pass
+        out.SetActive_XHwpDocument()
+        self._insert_file(tmp, keep_section=1)
+        trace("첫 장 넣은 뒤 {}쪽".format(h.PageCount))
+        if h.PageCount > 1:
+            self.move(2)
+            self.run("Delete")                          # 맨 앞 빈 문단(빈 쪽) 지움
+            trace("앞 빈 쪽 지운 뒤 {}쪽".format(h.PageCount))
+        for i in range(1, len(people)):
             self.move(3)
-            self._insert_file(tmp)
+            self.run("BreakPage")
+            self.move(3)
+            self._insert_file(tmp, keep_section=0)
+        try:
+            pages = h.PageCount
+        except Exception:
+            pages = None
+        trace("수료증 틀 끼워 넣기: {}명 → {}쪽".format(len(people), pages))
+        if pages is not None and pages != len(people):
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            raise UserError("수료증이 {}명인데 {}쪽으로 만들어졌습니다. 한글을 다시 켠 뒤 해 보세요.".format(len(people), pages))
         names, values = [], []
         for i, (org, rank, name) in enumerate(people):
-            row = {"번호": numbers[i], "소속": org, "직급": rank, "성명": name}
+            row = {"연도": numbers[i][0], "번호": numbers[i][1], "소속": org, "직급": rank, "성명": name}
             row.update(common)
-            for field, _ in logic.CERT_SAMPLES:
-                if field in missing:
+            for field in ["연도", "번호"] + [f for f, _ in logic.CERT_SAMPLES]:
+                if field in missing or (field == "연도" and "번호(연도)" in missing):
                     continue
                 names.append("{}{{{{{}}}}}".format(field, i))
                 values.append(row.get(field, ""))
@@ -1568,10 +1633,11 @@ class Hwp:
         safe = "".join(c for c in common.get("과정명", "") if c not in '\\/:*?"<>|')[:40].strip() or "교육"
         dst = os.path.join(work, "수료증_{}_{}.hwp".format(safe, stamp))
         h.SaveAs(dst, "HWP", "")
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
+        for f in (tmp,):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
         self.move(2)
         return dst, missing
 

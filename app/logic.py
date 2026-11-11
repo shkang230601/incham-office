@@ -221,7 +221,6 @@ def today_text(d=None):
 # ---------- 수료증 ----------
 # 양식 속 예시 글자 → 칸 이름
 CERT_SAMPLES = [
-    ("번호", "2026-303"),
     ("소속", "인천부평지역자활센터"),
     ("직급", "팀장"),
     ("성명", "김미숙"),
@@ -230,6 +229,9 @@ CERT_SAMPLES = [
     ("교육구분", "오프라인 교육"),
     ("발급일", "2026년  7월  3일"),
 ]
+# 번호는 양식에 "제2026 - 303호"로 (사이가 고정폭 빈칸) 들어 있어 연도·일련번호를 따로 찾음
+CERT_NO_YEAR = "제2026"     # 이 글자의 뒤 4자리(연도) 자리에 '연도' 칸
+CERT_NO_SERIAL = "303"      # 일련번호 자리에 '번호' 칸
 _HEADER_WORDS = {"소속", "직급", "성명", "이름", "기관명", "회사명", "직위"}
 
 
@@ -267,19 +269,98 @@ def parse_roster_text(text):
 
 
 def cert_numbers(start, count):
-    """'2026-303' → ['2026-303', '2026-304', ...] (앞자리 0 유지)"""
-    m = re.match(r"^(.*?)(\d+)$", start.strip())
+    """'2026-303' → [('2026', '303'), ('2026', '304'), ...] (앞자리 0 유지).
+    연도 없이 '303'만 쓰면 올해 연도."""
+    s = re.sub(r"\s+", "", start or "").strip("제호")
+    m = re.match(r"^(?:(\d{4})-)?(\d+)$", s)
     if not m:
-        raise ValueError("시작 번호는 숫자로 끝나야 합니다. 예: 2026-303")
-    prefix, num = m.group(1), m.group(2)
+        raise ValueError("시작 번호는 '2026-303'처럼 써 주세요. (숫자만 쓰면 올해 연도로 넣음)")
+    year = m.group(1) or str(datetime.date.today().year)
+    num = m.group(2)
     width = len(num)
-    return ["{}{}".format(prefix, str(int(num) + i).zfill(width)) for i in range(count)]
+    return [(year, str(int(num) + i).zfill(width)) for i in range(count)]
+
+
+def parse_date_text(text, year=None):
+    """'2026. 11. 10.', '2026-11-10', '11. 10.' 등 → date (못 읽으면 None)"""
+    nums = re.findall(r"\d+", text or "")
+    try:
+        if len(nums) >= 3 and len(nums[0]) == 4:
+            return datetime.date(int(nums[0]), int(nums[1]), int(nums[2]))
+        if len(nums) >= 2:
+            return datetime.date(year or datetime.date.today().year, int(nums[0]), int(nums[1]))
+    except ValueError:
+        return None
+    return None
 
 
 def cert_date_text(d=None):
-    """수료증 양식 표기: 2026년  10월  30일 (년·월 뒤 두 칸)"""
+    """수료증 발급일: 숫자 자리 수와 상관없이 폭이 같게 (칸에서 한 줄 유지)
+    7월 3일 → '2026년  7월  3일' / 11월 10일 → '2026년 11월 10일'"""
     d = d or datetime.date.today()
-    return "{}년  {}월  {}일".format(d.year, d.month, d.day)
+    m, dd = str(d.month), str(d.day)
+    return "{}년{}{}월{}{}일".format(d.year, " " * (3 - len(m)), m, " " * (3 - len(dd)), dd)
+
+
+def cert_date_norm(text):
+    """사용자가 쓴 발급일을 양식 모양으로. 날짜로 못 읽으면 그대로."""
+    d = parse_date_text(text)
+    return cert_date_text(d) if d else (text or "").strip()
+
+
+def _hm(text):
+    """'14:00', '14시', '1400', '9:30' → 분. 못 읽으면 None"""
+    s = (text or "").strip().replace("시", ":").replace("분", "").replace(".", ":")
+    m = re.match(r"^(\d{1,2})(?::?(\d{2}))?:?$", s)
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2) or 0)
+    if h > 24 or mi > 59:
+        return None
+    return h * 60 + mi
+
+
+LUNCH = (12 * 60, 13 * 60)      # 점심시간 (교육 시간에서 뺌)
+
+
+def cert_hours(start, end):
+    """교육 시간(시간 단위, 점심시간 겹치는 만큼 뺌). 못 읽으면 None"""
+    a, b = _hm(start), _hm(end)
+    if a is None or b is None or b <= a:
+        return None
+    lunch = max(0, min(b, LUNCH[1]) - max(a, LUNCH[0]))
+    return (b - a - lunch) / 60
+
+
+def cert_period_text(date_text, start, end):
+    """'2026. 11. 10.(화) 14:00~17:00 (3H)' — 못 읽으면 None"""
+    d = parse_date_text(date_text)
+    hrs = cert_hours(start, end)
+    if d is None or hrs is None:
+        return None
+    a, b = _hm(start), _hm(end)
+    h = ("%g" % round(hrs, 2))
+    return "{} {:d}:{:02d}~{:d}:{:02d} ({}H)".format(date_fmt(d, "dotw"), a // 60, a % 60, b // 60, b % 60, h)
+
+
+def cert_excel_template(path):
+    """수강생 명단 엑셀 양식 (소속·직급·성명 머리줄)"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "수강생 명단"
+    ws.append(["소속", "직급", "성명"])
+    thin = Side(style="thin", color="999999")
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = PatternFill("solid", fgColor="DDE4F5")
+        c.alignment = Alignment(horizontal="center")
+        c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for col, w in zip("ABC", (34, 14, 14)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    wb.save(path)
 
 
 # =====================================================================

@@ -23,7 +23,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 배포에 넣는 것 (이 밖의 파일은 시험용으로 보고 뺌)
 APP_FILES = ["main.py", "hwpctl.py", "logic.py", "styles.py", "updater.py", "update_config.json"]
-APP_DIRS = ["assets", "forms"]
+APP_DIRS = ["assets", "forms", "vendor"]
 # 들어가면 안 되는 개인 정보 (글자 파일만 검사)
 PRIVATE = [r"강신현", r"topka23", r"010-?6554-?9409", r"032-?810-?2836"]
 
