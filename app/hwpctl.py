@@ -4,6 +4,7 @@ import os
 import random
 import re
 import shutil
+import traceback
 import datetime
 
 import pythoncom
@@ -18,7 +19,7 @@ FACE_ALIAS = {"중고딕": ["한양중고딕", "HY중고딕"], "신명조": ["�
               "견명조": ["한양견명조", "HY견명조"], "휴먼명조": ["한양신명조"]}
 FONT_OK = {}  # 실제로 먹힌 (글꼴, 종류)를 기억
 NAVY = (0, 51, 102)          # 큰 제목 칸 #003366
-BAR_NAVY = (52, 54, 119)     # 제목 상자 띠 #343677
+BAR_NAVY = (0, 51, 102)      # 제목 상자 띠 — 큰 제목 칸과 같은 남색 #003366 (예전 #343677)
 BAR_BLUE = (0, 109, 219)     # 제목 상자 띠 #006DDB
 TITLE_GRAY = (239, 239, 239)  # 제목 상자 칸 #EFEFEF
 HEAD_BLUE = (230, 238, 247)  # 인천상의 표 머리줄 #E6EEF7 (인천시 제목 상자 색과 같음)
@@ -103,7 +104,8 @@ class Hwp:
     def __init__(self):
         self.h = None
         self.mem = {}  # 기호 복사, 셀 크기 복사 등 기억
-        self.active = {}  # 고른 서식 세트 {기호: 서식}. 비어 있으면 보고서 공통 서식
+        self.active = {}  # 불러온 서식 세트 {기호: 서식} — [불러온 서식 기호] 칸 버튼에서만 씀
+        self._set = {}    # 지금 쓰는 세트 (기본 개조식 버튼은 항상 비어 있음 → 보고서 공통 서식)
         self.me = {}  # 내 정보 {dept, title, name, phone, email} — 화면에서 넣어 줌
 
     # ================= 연결 =================
@@ -598,9 +600,9 @@ class Hwp:
                 pass
 
     def spec_for(self, key):
-        """세트에 있으면 세트 서식, 없으면 보고서 공통 서식."""
-        if key in self.active:
-            return self.active[key]
+        """[불러온 서식 기호] 버튼이면 세트 서식, 아니면 보고서 공통 서식 (개조식 기호는 전체 통일)."""
+        if key in self._set:
+            return self._set[key]
         return logic.BULLETS.get(key)
 
     def do_bullet(self, sym):
@@ -614,15 +616,15 @@ class Hwp:
 
     def _box_spec(self, level):
         for k in styles.BOX_LEVEL_KEYS[level]:
-            if k in self.active:
-                return self.active[k]
+            if k in self._set:
+                return self._set[k]
         return logic.BOX_LEVELS[level]
 
     def _num_text(self, level, idx):
         """세트에 그 단계가 있으면 세트의 기호 앞 칸 수를 따름."""
         key = styles.NUM_LEVEL_KEYS[level]
-        if key in self.active:
-            t = self.active[key]["text"]
+        if key in self._set:
+            t = self._set[key]["text"]
             spaces = len(t) - len(t.lstrip())
             return " " * spaces + logic._token(level, idx) + " "
         return logic.num_text(level, idx)
@@ -630,12 +632,25 @@ class Hwp:
     def _style_num(self, level, text):
         """세트에 그 번호가 있으면 세트 서식, 없으면 개조식 기호와 같은 서식."""
         key = styles.NUM_LEVEL_KEYS[level]
-        if key in self.active:
-            spec = dict(self.active[key])
+        if key in self._set:
+            spec = dict(self._set[key])
             spec["text"] = text
         else:
             spec = logic.num_spec(level, text)
         self._apply_bullet_style(spec)
+
+    def set_bullet(self, key):
+        """불러온 서식의 기호·번호로 넣기 ([불러온 서식 기호] 칸)"""
+        if key not in self.active:
+            raise UserError("불러온 서식에 '{}' 기호가 없습니다.".format(key))
+        self._set = self.active
+        try:
+            if key in styles.NUM_LEVEL_KEYS:
+                self.do_level(styles.NUM_LEVEL_KEYS.index(key))
+            else:
+                self.put_bullet(self.active[key])
+        finally:
+            self._set = {}
 
     def do_item(self, action):
         lines = self.text_before_cursor()
@@ -915,26 +930,94 @@ class Hwp:
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _open_copy(self, template, name):
-        if not os.path.exists(template):
-            raise UserError("양식 파일을 찾지 못했습니다: " + os.path.basename(template))
-        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        dst = os.path.join(self._docs_dir(), "{}_{}.hwp".format(name, stamp))
-        shutil.copyfile(template, dst)
-        self.new_doc()
-        self.h.Open(dst, "HWP", "forceopen:true")
+    def _unique(self, stem, ext=".hwpx"):
+        """'인천상의 문서' 폴더에서 겹치지 않는 파일 경로 (같은 이름이 있으면 ' (2)', ' (3)' …)"""
+        folder = self._docs_dir()
+        dst = os.path.join(folder, stem + ext)
+        n = 2
+        while os.path.exists(dst):
+            dst = os.path.join(folder, "{} ({}){}".format(stem, n, ext))
+            n += 1
         return dst
 
+    def _save_hwpx(self, stem):
+        """지금 문서를 '인천상의 문서'에 stem.hwpx 로 저장하고 그 경로를 돌려줌"""
+        dst = self._unique(logic.safe_filename(stem))
+        self.h.SaveAs(dst, "HWPX", "")
+        return dst
+
+    def _open_copy(self, template, stem):
+        """양식을 열어 '인천상의 문서'에 안내 이름(stem).hwpx 로 저장해 둠 — logic.doc_name 참고.
+        (양식 원본은 그대로. 원본 사본을 임시 폴더에 두고 열어서 hwpx 로 다른 이름 저장)"""
+        if not os.path.exists(template):
+            raise UserError("양식 파일을 찾지 못했습니다: " + os.path.basename(template))
+        import tempfile
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        ext = os.path.splitext(template)[1].lower() or ".hwp"
+        tmp = os.path.join(tempfile.gettempdir(), "인천상의_열기_{}{}".format(stamp, ext))
+        shutil.copyfile(template, tmp)
+        self.new_doc()
+        h = self.h
+        try:
+            blank = h.XHwpDocuments.Active_XHwpDocument
+        except Exception:
+            blank = None
+        h.Open(tmp, "HWPX" if ext == ".hwpx" else "HWP", "forceopen:true")
+        try:                                # 양식이 새 탭으로 열렸으면 남은 빈 문서는 닫음 (빈 창이 쌓이지 않게)
+            cur = h.XHwpDocuments.Active_XHwpDocument
+            if blank is not None and cur.DocumentID != blank.DocumentID and not blank.FullName:
+                blank.SetActive_XHwpDocument()
+                empty = h.IsEmpty and not blank.Modified
+                cur.SetActive_XHwpDocument()
+                if empty:
+                    blank.Close(False)
+                    cur.SetActive_XHwpDocument()
+        except Exception:
+            pass
+        dst = self._save_hwpx(stem)
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        return dst
+
+    def _dept(self):
+        return (self.me or {}).get("dept", "")
+
     def do_open_report(self, template):
-        dst = self._open_copy(template, "업무보고")
+        dst = self._open_copy(template, logic.doc_name("report"))
         self.replace_all("2026. 2. 12", logic.today_text())
         self.replace_all("\U000F03DA", "")
+        # 본문 칸에 □ ○ - · 한 줄씩 미리 넣고 □ 줄 끝에 커서 (보고서 공통 서식)
+        try:
+            self.move(2)
+            if self.find("제목"):
+                self.run("Cancel")
+                self.run("TableLowerCell")
+                if self.in_table():
+                    first = None
+                    for i, sym in enumerate(("□", "○", "-", "·")):
+                        if i:
+                            self.run("BreakPara")
+                        self.do_bullet(sym)
+                        self.run("MoveParaEnd")
+                        if first is None:
+                            first = self.h.GetPos()
+                    if first:
+                        self.h.SetPos(*first)
+        except Exception:
+            trace("업무보고 □○ 넣기 실패\n" + traceback.format_exc())
+        return dst
+
+    def do_open_greeting(self, template):
+        """인사말씀: 머리 칸(행사명·일시·장소)은 자리 글자, 본문은 비어 있음 → 본문 첫 줄에 커서"""
+        dst = self._open_copy(template, logic.doc_name("greeting"))
+        self.move(3)
         return dst
 
     def do_open_letter(self, template, lang):
         d = datetime.date.today()
-        name = {"ko": "공문", "en": "공문_영문", "ja": "공문_일문"}[lang]
-        dst = self._open_copy(template, name)
+        dst = self._open_copy(template, logic.doc_name("letter"))
         if lang == "ko":
             self.replace_sure("2024. 00. 00", logic.date_fmt(d, "dot"))
         elif lang == "en":
@@ -1087,13 +1170,7 @@ class Hwp:
         """내 서식을 새 파일로 열고 정해 둔 자리에 내 정보·오늘 날짜를 넣음."""
         if not os.path.exists(stored):
             raise UserError("'{}' 양식 파일을 찾지 못했습니다. 다시 등록해 주세요.".format(entry.get("name")))
-        ext = os.path.splitext(stored)[1] or ".hwp"
-        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe = "".join(c for c in entry.get("name", "내서식") if c not in '\\/:*?"<>|')
-        dst = os.path.join(self._docs_dir(), "{}_{}{}".format(safe, stamp, ext))
-        shutil.copyfile(stored, dst)
-        self.new_doc()
-        self.h.Open(dst, "HWPX" if ext.lower() == ".hwpx" else "HWP", "forceopen:true")
+        dst = self._open_copy(stored, logic.doc_name("myform", name=entry.get("name", "내 서식")))
         # 예전 규칙으로 등록한 서식이면 이번에 자리를 다시 찾아 합침 (다른 PC에서 등록한 것도 같음)
         if entry.get("rules", 1) < logic.FIELD_RULES:
             found = [{"find": t, "kind": k} for t, k in logic.detect_fields(self.doc_text())]
@@ -1122,7 +1199,7 @@ class Hwp:
 
     def do_open_weekly(self, template):
         """주간 주요 일정 및 보도자료 배포 계획: 기간(다가오는 일~토)과 담당자 칸(소속 / 이름 직위 / 전화)."""
-        dst = self._open_copy(template, "보도자료배포계획")
+        dst = self._open_copy(template, logic.doc_name("weekly", self._dept()))
         import re as _re
         t = self.doc_text()
         m = _re.search(r"\d{2}\.\s?\d{1,2}\.\s?\d{1,2}\.\s?~\s?\d{2}\.\s?\d{1,2}\.\s?\d{1,2}\.", t)
@@ -1143,12 +1220,12 @@ class Hwp:
         return dst
 
     def do_open_press(self, template):
-        dst = self._open_copy(template, "보도자료")
+        dst = self._open_copy(template, logic.doc_name("press"))
         self.fill_me("press")
         return dst
 
     def do_open_plain(self, template, name):
-        return self._open_copy(template, name)
+        return self._open_copy(template, logic.doc_name("plain", name=name))
 
     def _cell_put(self, text):
         """커서가 있는 셀의 글을 text로 바꿈 (빈 글이면 지움)."""
@@ -1162,7 +1239,7 @@ class Hwp:
     def do_open_travel(self, template, companions=None, days=1):
         """여비계산서: 위쪽 기간은 오늘이 속한 년·월만 (일은 비움), 아래 청구일·영수일은 오늘 날짜.
         companions: 출장 간 사람 [{"dept","name","title"}] 전체 — 두 명 이상이면 영수인 줄에 모두 넣고 끝에 <붙임> 표."""
-        dst = self._open_copy(template, "여비계산서")
+        dst = self._open_copy(template, logic.doc_name("travel"))
         self._act_calc = None
         d = datetime.date.today()
         self.move(2)
@@ -1502,7 +1579,7 @@ class Hwp:
     def do_open_overtime(self, template, d1, d2, place, what, people):
         """시간외 근로 현황: d1·d2 = 시작일·끝일(date, 하루면 d2=None),
         people = [{"name","title","start","end","total"}] — total을 비우면 하루짜리는 시간에서 계산."""
-        dst = self._open_copy(template, "시간외근로")
+        dst = self._open_copy(template, logic.doc_name("overtime", self._dept(), what=what))
         dept = (self.me or {}).get("dept", "")
         self.replace_all("시간외 근무 현황", "시간외 근로 현황")
         if dept:
@@ -1520,7 +1597,7 @@ class Hwp:
 
     def do_open_card(self, template):
         """법인카드 사용 내역: 사용일시 오늘(요일), 사용자 부서·직위·성명."""
-        dst = self._open_copy(template, "법인카드사용내역")
+        dst = self._open_copy(template, logic.doc_name("card", self._dept()))
         self.fill_me("card")
         self.move(2)
         return dst
@@ -1630,9 +1707,7 @@ class Hwp:
                 names.append("{}{{{{{}}}}}".format(field, i))
                 values.append(row.get(field, ""))
         h.PutFieldText("\x02".join(names), "\x02".join(values))
-        safe = "".join(c for c in common.get("과정명", "") if c not in '\\/:*?"<>|')[:40].strip() or "교육"
-        dst = os.path.join(work, "수료증_{}_{}.hwp".format(safe, stamp))
-        h.SaveAs(dst, "HWP", "")
+        dst = self._save_hwpx(logic.doc_name("cert", name=common.get("과정명", "")[:40]))
         for f in (tmp,):
             try:
                 os.remove(f)
@@ -1642,6 +1717,9 @@ class Hwp:
         return dst, missing
 
     # ================= 표 기본 도구 =================
+    PAD_W, PAD_H = 3.6, 1.0   # 한글이 새 표 칸에 더하는 안쪽 여백(mm): 좌우 합, 위아래 합
+    MIN_W = 4.6               # 한글 새 표 칸의 최소 너비(mm)
+
     def table_create(self, rows, cols, widths=None, heights=None):
         """widths/heights: mm 목록. 커서 자리에 글자처럼 취급하는 표를 만듦."""
         h = self.h
@@ -1649,10 +1727,18 @@ class Hwp:
         h.HAction.GetDefault("TableCreate", p.HSet)
         p.Rows = rows
         p.Cols = cols
+        # 한글은 칸마다 안쪽 여백(좌우 1.8mm씩, 위아래 0.5mm씩)을 더해서 만듦 → 미리 빼서 적은 크기 그대로 나오게
         if widths:
+            want = [float(w) for w in widths]
+            real = [max(w, self.MIN_W) for w in want]               # 한글이 만드는 가장 좁은 칸은 약 4.6mm
+            adj = [r - self.PAD_W for r in real]
+            extra = sum(real) - sum(want)                           # 좁은 칸 때문에 늘어난 만큼은 가장 넓은 칸에서 뺌
+            if extra > 0:
+                k = adj.index(max(adj))
+                adj[k] = max(0.1, adj[k] - extra)
             p.WidthType = 2
             p.CreateItemArray("ColWidth", cols)
-            for i, w in enumerate(widths):
+            for i, w in enumerate(adj):
                 p.ColWidth.SetItem(i, h.MiliToHwpUnit(w))
         else:
             p.WidthType = 0
@@ -1660,13 +1746,19 @@ class Hwp:
             p.HeightType = 1
             p.CreateItemArray("RowHeight", rows)
             for i, v in enumerate(heights):
-                p.RowHeight.SetItem(i, h.MiliToHwpUnit(v))
+                p.RowHeight.SetItem(i, h.MiliToHwpUnit(max(0.1, v - self.PAD_H)))
         else:
             p.HeightType = 0
         try:
             p.TableProperties.TreatAsChar = 1
         except Exception:
             pass
+        if widths:   # 너비를 정한 표는 바깥 좌우 여백 0 → 본문 왼쪽·오른쪽 끝(인쇄선)에 딱 맞음
+            for key in ("OutsideMarginLeft", "OutsideMarginRight"):
+                try:
+                    setattr(p.TableProperties, key, 0)
+                except Exception:
+                    pass
         h.HAction.Execute("TableCreate", p.HSet)
 
     def cell_block_all(self):
@@ -1692,11 +1784,17 @@ class Hwp:
                         ("Horz", horz), ("Vert", vert)):
             if v is None:
                 continue
-            s.SetItem("BorderType" + name, v[0])
-            s.SetItem("BorderWidth" + name, v[1])
-            if color is not None:
+            # 바깥선은 BorderType…, 안쪽 선(Horz·Vert)은 Type…/Width…/Color… 이름을 씀
+            # (BorderTypeHorz 는 조용히 무시되어 '선 없음'에서 안쪽 선이 남았음) → 두 이름 모두 넣음
+            keys = [("BorderType", "BorderWidth", "BorderColor")]
+            if name in ("Horz", "Vert"):
+                keys.append(("Type", "Width", "Color"))
+            for kt, kw, kc in keys:
                 try:
-                    s.SetItem("BorderColor" + name, self.rgb(color))
+                    s.SetItem(kt + name, v[0])
+                    s.SetItem(kw + name, v[1])
+                    if color is not None:
+                        s.SetItem(kc + name, self.rgb(color))
                 except Exception:
                     pass
         act.Execute(s)
@@ -1732,7 +1830,7 @@ class Hwp:
             raise UserError("표 안에 커서를 두고 눌러 주세요.")
         self.cell_block_all()
         self.char_shape(face="맑은 고딕", size=12, normal=True)
-        self.run("ParagraphShapeAlignCenter")
+        self.para_shape(line_spacing=160, align=3)      # 인천시·타 기관 관행: 160%, 가운데
         self.borders(top=(SOLID, THICK), bottom=(SOLID, THICK), left=(NONE, THIN), right=(NONE, THIN),
                      horz=(SOLID, THIN), vert=(SOLID, THIN), color=(0, 0, 0))
         self.cell_fill(None)
@@ -1741,14 +1839,38 @@ class Hwp:
         self.cell_block_row()
         self.cell_fill(HEAD_BLUE)
         self.char_shape(bold=True)
+        self.borders(bottom=(SOLID, THICK), color=(0, 0, 0))     # 제목줄 아랫선도 굵게
         self.run("Cancel")
         self.go_first_cell()
 
-    def do_incham_table(self, rows, cols):
-        if self.in_table():
-            raise UserError("표 밖에서 눌러 주세요. (지금 커서가 표 안에 있습니다)")
+    def style_plain_table(self, lines=True):
+        """일반 표: 맑은 고딕 12 · 160% · 가운데, 제목줄 굵게(색 없음). lines=False 면 선 없음."""
+        self.cell_block_all()
+        self.char_shape(face="맑은 고딕", size=12, normal=True)
+        self.para_shape(line_spacing=160, align=3)
+        kind = (SOLID, THIN) if lines else (NONE, THIN)
+        self.borders(top=kind, bottom=kind, left=kind, right=kind, horz=kind, vert=kind, color=(0, 0, 0))
+        self.cell_fill(None)
+        self.run("Cancel")
+        self.go_first_cell()
+        self.cell_block_row()
+        self.char_shape(bold=True)
+        self.run("Cancel")
+        self.go_first_cell()
+
+    def do_incham_table(self, rows, cols, kind="incham"):
+        """kind: incham 인천상의 / plain 일반(얇은 선) / none 선 없음.
+        표 안(셀)에서 누르면 그 셀 안에 표를 넣음 — 폭은 셀에 맞고, 모양은 새로 만든 안쪽 표에만 입힘
+        (표를 만든 직후 커서가 새 표의 첫 칸에 있으므로 아래 동작은 모두 안쪽 표에 적용됨)"""
         self.table_create(rows, cols)
-        self.style_incham_table()
+        if not self.in_table():
+            raise UserError("표를 만들지 못했습니다.")
+        if kind == "plain":
+            self.style_plain_table(True)
+        elif kind == "none":
+            self.style_plain_table(False)
+        else:
+            self.style_incham_table()
 
     def do_roster_table(self):
         rows = logic.roster_table_rows(10)
@@ -2056,11 +2178,11 @@ class Hwp:
             text = self._take_line() or "보고서 제목"
         self._new_line_if_needed()
         self.run("ParagraphShapeAlignCenter")
-        self.table_create(3, 2, widths=[37, 133], heights=[1, 14, 1])
+        self.table_create(3, 2, widths=[37, 133], heights=[1.2, 16.4, 1.2])   # 원본 상자: 띠 약 1.2mm, 회색 칸 약 16.4mm
         self.cell_block_all()
         self.borders(top=(NONE, THIN), bottom=(NONE, THIN), left=(NONE, THIN), right=(NONE, THIN),
                      horz=(NONE, THIN), vert=(NONE, THIN))
-        self.char_shape(size=1)
+        self.char_shape(size=0.5)   # 띠 칸 속 글자를 0.5pt로 (원본과 같게 — 1pt면 띠가 2mm로 두꺼워짐)
         self.para_shape(line_spacing=100)
         self.run("Cancel")
         self.go_first_cell()
@@ -2090,21 +2212,93 @@ class Hwp:
             self.insert(subtitle)
         self._after_table()
 
+    SCHED_W = [34.8, 17.9, 84.3, 25.8]          # 시간표 칸 너비(mm): 시각 | 분 | 내용 | 비고 — 원본 표와 같은 162.8mm
+
+    def schedule_table(self, rows=6):
+        """행사 순서 시간표 틀 (특별강연 양식 모양): 시 간(시각·분) | 내 용 | 비 고.
+        맑은 고딕 13pt, 줄간격 130%, 머리줄 연파랑·굵게, 위아래 굵은 선, 좌우 바깥선 없음, 내용 칸에 ❍"""
+        self._new_line_if_needed()
+        self.run("ParagraphShapeAlignCenter")
+        self.table_create(rows + 1, 4, widths=self.SCHED_W, heights=[11.5] * (rows + 1))
+        self.cell_block_all()
+        self.char_shape(face="맑은 고딕", size=13, normal=True)
+        self.para_shape(line_spacing=130, align=3)
+        self.run("TableVAlignCenter")
+        self.borders(top=(SOLID, THICK), bottom=(SOLID, THICK), left=(NONE, THIN), right=(NONE, THIN),
+                     horz=(SOLID, 3), vert=(SOLID, 3), color=(0, 0, 0))
+        self.run("Cancel")
+        # 내용 칸: 왼쪽 정렬 + ❍
+        self.go_first_cell()
+        for _ in range(rows):
+            self.run("TableLowerCell")
+            self.run("TableRightCell")
+            self.run("TableRightCell")
+            self.para_shape(align=1)
+            self.insert("\u274d ")
+            self.run("TableLeftCell")
+            self.run("TableLeftCell")
+            self.insert("~")
+        # 머리줄: 시각·분 칸 합쳐 '시 간', 연파랑, 굵게
+        self.go_first_cell()
+        self.cell_block_row()
+        self.cell_fill(HEAD_BLUE)
+        self.char_shape(bold=True)
+        self.run("Cancel")
+        self.go_first_cell()
+        self.runs("TableCellBlock", "TableCellBlockExtend", "TableRightCell", "TableMergeCell", "Cancel")
+        self.go_first_cell()
+        self.insert("시   간")
+        self.run("TableRightCell")
+        self.insert("내   용")
+        self.run("TableRightCell")
+        self.insert("비  고")
+        # 첫 줄 시각 칸에 커서
+        self.go_first_cell()
+        self.run("TableLowerCell")
+
+    SUMMARY_PH = "요지를 입력하세요"
+
     def summary_line(self, text=None):
-        """요지: ❖ 한 줄, 가운데, 상자 없음 (인천상의 모양) + 중고딕 15pt, 줄간격 160% (보고서 공통 서식)"""
+        """요지: 둥근 남색 테두리 상자 안에 ❖ 요지 (휴먼명조 14pt 굵게, 160%) — 상공회의소 보고서 원본에서 떠 온 상자.
+        커서 줄에 요지를 써 두고 누르면 그 글이 상자 안으로 들어감."""
         if text is None:
             t = self._take_line()
-            text = t.lstrip("❖ ").strip() if t else "요지를 한 줄로 입력하세요"
+            text = t.lstrip("❖ ").strip() if t else ""
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "forms", "summary_box.hwp")
+        if not os.path.exists(path):
+            raise UserError("요지 상자 파일(summary_box.hwp)을 찾지 못했습니다.")
+        if self.has_selection():
+            self.run("Cancel")
         self._new_line_if_needed()
-        self.insert("❖ " + text)
+        self._insert_file(path, keep_section=0)
+        pos = self.h.GetPos()
+        if text and text != self.SUMMARY_PH:
+            self.replace_all(self.SUMMARY_PH, text)
+        try:
+            self.h.SetPos(*pos)
+        except Exception:
+            pass
+        self.run("MoveParaEnd")
+        self.run("BreakPara")
+        self.char_shape(face="휴먼명조", size=15, bold=False)
+        self.para_shape(line_spacing=160, align=0, indent=0, left=0, prev=0)
+
+    def date_line(self):
+        """작성일 줄: 오늘 날짜(요일), 부서 — 오른쪽 정렬, 맑은 고딕 12pt, 140%"""
+        d = datetime.date.today()
+        t = "{}. {}. {}({})".format(d.year, d.month, d.day, "월화수목금토일"[d.weekday()])
+        dept = self._dept()
+        if dept:
+            t += ", " + dept
+        self._new_line_if_needed()
+        self.insert(t)
         self.select_para()
-        self.char_shape(face="중고딕", size=15, bold=False, italic=False, spacing=0, ratio=100)
-        self.para_shape(line_spacing=160, align=3, indent=0, left=0, prev=0)
+        self.char_shape(face="맑은 고딕", size=12, bold=False, italic=False, spacing=0, ratio=100)
+        self.para_shape(line_spacing=140, align=2, indent=0, left=0, prev=0)
         self.run("Cancel")
         self.run("MoveParaEnd")
         self.run("BreakPara")
         self.para_shape(align=0)
-        self.char_shape(bold=False)
 
     def big_title(self, text=None):
         """큰 제목: 남색 칸 흰 글자 Ⅰ + 제목 + 아래 밑줄, HY헤드라인M 16pt 180%"""
@@ -2139,7 +2333,7 @@ class Hwp:
         self._after_table()
 
     def report_frame(self):
-        self.report_build("보고서 제목", "요지를 한 줄로 입력하세요", ["사업개요", "세부 추진계획", "소요예산(안)"],
+        self.report_build("보고서 제목", "요지를 입력하세요", ["사업개요", "세부 추진계획", "소요예산(안)"],
                           new_doc=False)
 
     # ---------- 보고서 양식 2: 표지 + 요약 + 본문 ----------
@@ -2244,6 +2438,7 @@ class Hwp:
             self.new_doc()
         self.page_margins()
         self.title_box(title or "보고서 제목")
+        self.date_line()
         if summary:
             self.summary_line(summary)
         first = None

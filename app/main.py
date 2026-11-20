@@ -191,7 +191,7 @@ MARKDOWN_HELP = """마크다운 → 한글 사용법
 ChatGPT·Claude가 쓴 글을 한글에 붙여 넣고, 그 글을 선택한 뒤 [마크다운→한글]을 누르면
 아래처럼 개조식 기호와 보고서 서식으로 바뀝니다.
 
-  # 제목, ## 제목      →  □ (휴먼명조 16pt 굵게)
+  # 제목, ## 제목      →  □ (HY헤드라인M 16pt 굵게)
   - 항목, 1. 항목      →  ○ (휴먼명조 15pt)
     - 들여 쓴 항목     →  -
       - 더 들여 쓴 항목 →  ·
@@ -314,13 +314,13 @@ class App:
         top.pack(fill="x")
         try:
             self.logo = tk.PhotoImage(file=os.path.join(APP, "assets", "logo.png"))
-            tk.Label(top, image=self.logo, bg="white").pack(side="left", padx=(10, 8), pady=8)
+            tk.Label(top, image=self.logo, bg="white").pack(side="left", padx=(8, 4), pady=5)
         except Exception:
             tk.Label(top, text="인천상공회의소", font=FONT_B, bg="white").pack(side="left", padx=(10, 8), pady=8)
         self.pin = tk.BooleanVar(value=True)
         tk.Checkbutton(top, text="항상 위", variable=self.pin, bg="white", font=FONT_S, fg=MUTED,
-                       command=lambda: root.attributes("-topmost", self.pin.get())).pack(side="right", padx=10)
-        self.hello = tk.Label(top, text=greeting(styles.load_profile()), font=FONT_T, fg=TEXT, bg="white")
+                       command=lambda: root.attributes("-topmost", self.pin.get())).pack(side="right", padx=6)
+        self.hello = tk.Label(top, text=greeting(styles.load_profile()), font=FONT_B, fg=TEXT, bg="white")
         self.hello.pack(side="left", padx=(4, 0))
         tk.Frame(root, bg=LINE, height=1).pack(fill="x")
 
@@ -332,7 +332,7 @@ class App:
         style.configure("TNotebook", background=SHELL, borderwidth=0, bordercolor=SHELL, lightcolor=SHELL,
                         darkcolor=SHELL, tabmargins=(0, 0, 0, 0))
         # 탭: 알약 모양 칩 — 고른 탭만 남색, 나머지는 회색 글씨
-        style.configure("TNotebook.Tab", font=FONT, padding=(10, 4), background=SHELL, foreground=MUTED,
+        style.configure("TNotebook.Tab", font=FONT, padding=(8, 3), background=SHELL, foreground=MUTED,
                         borderwidth=0, bordercolor=SHELL, lightcolor=SHELL, focuscolor=SHELL)
         style.map("TNotebook.Tab",
                   background=[("selected", NAVY), ("active", HOVER)],
@@ -350,32 +350,42 @@ class App:
                         lightcolor=SHELL, darkcolor=SHELL, arrowcolor=MUTED)
         self.build_profile(root)
         self.nb = ttk.Notebook(root)
-        self.nb.pack(fill="both", padx=10, pady=(8, 0))
+        self.nb.pack(fill="both", padx=8, pady=(6, 0))
 
         self.build_tabs()
         self.refresh_sets()
         self.refresh_myforms()
 
         bottom = tk.Frame(root, bg=SHELL)
-        bottom.pack(fill="x", padx=10, pady=(8, 2))
+        bottom.pack(fill="x", padx=8, pady=(6, 2))
         tk.Button(bottom, text="한글 다시 연결", font=FONT_S, command=self.reconnect, padx=6).pack(side="left")
         self.status = tk.Label(bottom, text="", font=FONT_S, bg=SHELL, fg=MUTED, anchor="w")
         self.status.pack(side="left", padx=8)
         self.tip = tk.Label(root, text="버튼에 마우스를 올리면 설명이 나옵니다", font=FONT_S, bg=SHELL, fg=MUTED,
-                            anchor="w", wraplength=440, justify="left")
-        self.tip.pack(fill="x", padx=10, pady=(0, 8))
+                            anchor="w", wraplength=400, justify="left")
+        self.tip.pack(fill="x", padx=8, pady=(0, 6))
         root.after(300, self.startup)
 
     # ---------------- 공통 ----------------
     def tab(self, name):
-        f = tk.Frame(self.nb, bg=SHELL, padx=0, pady=6)
+        f = tk.Frame(self.nb, bg=SHELL, padx=0, pady=4)
         self.nb.add(f, text=name)
         return f
 
     def group(self, parent, title, buttons, cols=4, height=None):
         """height: 버튼 높이(글줄 수). 주면 그 칸 버튼을 모두 같은 높이로."""
-        f = tk.LabelFrame(parent, text=" " + title + " ", font=FONT_B, fg=NAVY, bg=BG, padx=5, pady=2)
-        f.pack(fill="x", pady=(0, 5))
+        f = tk.LabelFrame(parent, text=" " + title + " ", font=FONT_B, fg=NAVY, bg=BG, padx=3, pady=1)
+        f.pack(fill="x", pady=(0, 3))
+        if buttons and isinstance(buttons[0], list):    # 줄마다 따로: [[줄1 버튼들], [줄2 버튼들]]
+            for row in buttons:
+                rf = tk.Frame(f, bg=BG)
+                rf.pack(fill="x")
+                self._buttons(rf, row, len(row), height)
+            return f
+        self._buttons(f, buttons, cols, height)
+        return f
+
+    def _buttons(self, f, buttons, cols, height):
         for i, item in enumerate(buttons):
             label, fn, tip = item[:3]
             opts = item[3] if len(item) > 3 else {}
@@ -389,16 +399,15 @@ class App:
                 import tkinter.font as tkfont
                 hh = tkfont.Font(font=opts.get("font", FONT)).metrics("linespace") * height + 6
             b = tk.Button(f, text=label, font=opts.get("font", FONT), height=hh,
-                          bg=opts.get("bg", "white"), fg=opts.get("fg", TEXT), padx=2, pady=2,
+                          bg=opts.get("bg", "white"), fg=opts.get("fg", TEXT), padx=1, pady=1,
                           image=dot or "", compound="left" if dot else "none",
                           command=fn if opts.get("raw") else (lambda fn=fn, label=label: self.call(fn, label.replace("\n", " "))))
-            b.grid(row=i // cols, column=i % cols, padx=2, pady=1, sticky="ew")
+            b.grid(row=i // cols, column=i % cols, padx=1, pady=1, sticky="ew")
             b.bind("<Enter>", lambda e, t=tip, l=label.replace("\n", " "): self.tip.config(text="{} : {}".format(l, t)),
                    add="+")
             b.bind("<Leave>", self._tip_reset, add="+")
         for c in range(cols):
             f.grid_columnconfigure(c, weight=1, uniform="g")
-        return f
 
     TIP_DEFAULT = "버튼에 마우스를 올리면 설명이 나옵니다"
 
@@ -844,10 +853,48 @@ class App:
             w.iconbitmap(os.path.join(APP, "assets", "icon_kcci.ico"))
         except Exception:
             pass
-        x = self.root.winfo_rootx() + self.root.winfo_width() + 6
-        y = self.root.winfo_rooty()
-        w.geometry("+{}+{}".format(x, y))
+        w.withdraw()                                    # 크기를 안 다음 자리를 잡아 보여 줌
+        w.after(10, lambda: self.place_popup(w))
         return w
+
+    def work_area(self):
+        """본창이 있는 모니터의 작업 영역 (작업 표시줄 제외) — (left, top, right, bottom)"""
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+
+            class MI(ctypes.Structure):
+                _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            mon = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)
+            mi = MI()
+            mi.cbSize = ctypes.sizeof(MI)
+            if ctypes.windll.user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                r = mi.rcWork
+                return r.left, r.top, r.right, r.bottom
+        except Exception:
+            pass
+        return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+    def place_popup(self, w):
+        """팝업을 화면 안에: 본창 오른쪽 → 안 되면 왼쪽 → 안 되면 본창 위에 겹쳐서."""
+        try:
+            w.update_idletasks()
+            pw, ph = w.winfo_reqwidth() + 20, w.winfo_reqheight() + 40     # 창 테두리·제목줄 몫
+            L, T, R, B = self.work_area()
+            rx, ry, rw = self.root.winfo_rootx(), self.root.winfo_rooty(), self.root.winfo_width()
+            if rx + rw + 6 + pw <= R:
+                x = rx + rw + 6
+            elif rx - 6 - pw >= L:
+                x = rx - 6 - pw
+            else:
+                x = rx + max(0, (rw - pw) // 2)
+            x = max(L, min(x, R - pw))
+            y = max(T, min(ry, B - ph))
+            w.geometry("+{}+{}".format(x, y))
+        except Exception:
+            pass
+        w.deiconify()
 
     def pop_buttons(self, w, items, cols=4, title=None, row=0):
         """items: (label, fn) — fn은 한글 동작"""
@@ -889,13 +936,30 @@ class App:
             ("법인카드\n사용내역", lambda: self.open_form("card"), "법인카드 사용 내역 — 사용일시 오늘, 사용자 부서·직위·성명 자동", {"dot": "#4d9193"}),
             ("시간외근로 ▸", self.dlg_overtime, "시간외 근로 현황 — 하루·여러 날 모두, 사람별 시간을 넣으면 표를 채우고 하루짜리는 합계(1h) 계산", {"raw": True, "dot": "#e5484d"}),
             ("수료증 ▸", self.dlg_cert, "명단을 넣으면 사람 수만큼 수료증을 채워 한 파일로", {"raw": True, "dot": "#e8833a"}),
+            ("인사말씀", lambda: self.open_form("greeting"), "인사말씀 원고 양식 — 머리(행사명·일시·장소) + 제목, 본문 맑은 고딕 18 굵게 155%", {"dot": "#c9a227"}),
         ], cols=3, height=2)
         self.group(t, "보고서", [
             ("보고서 만들기 ▸", self.dlg_report, "양식 1(본문) 또는 양식 2(표지 + 요약 + 본문) — 제목·큰 제목만 적으면 보고서 틀을 한 번에", {"raw": True, "bg": "#e8edf8", "font": FONT_B}),
             ("제목 상자", h.title_box, "줄에 제목을 써 두고 누르면 그 글로 제목 상자 (HY헤드라인M 24pt)"),
-            ("요지", h.summary_line, "줄에 요지를 써 두고 누르면 ❖ 요지 줄로 (중고딕 15pt, 가운데)"),
+            ("요지", h.summary_line, "줄에 요지를 써 두고 누르면 둥근 남색 상자 안에 ❖ 요지로 (휴먼명조 14pt 굵게)"),
             ("큰 제목", h.big_title, "줄에 제목을 써 두고 누르면 남색 칸 Ⅰ·Ⅱ·Ⅲ 큰 제목으로 (번호 자동)"),
-        ])
+            ("시간표", h.schedule_table, "행사 순서 시간표 틀: 시 간(시각 ~ · 분) | 내 용(❍) | 비 고 — 6줄, 맑은 고딕 13pt (줄은 [표] 탭에서 더하기·빼기)"),
+        ], cols=5)
+        self.group(t, "개조식 기호 (보고서 공통 서식)", [
+            ("□", lambda: h.do_bullet("□"), "HY헤드라인M 16pt 굵게, 180%"),
+            ("○", lambda: h.do_bullet("○"), "휴먼명조 15pt, 160%, 1칸 들여"),
+            ("-", lambda: h.do_bullet("-"), "휴먼명조 15pt, 160%, 2칸 들여"),
+            ("·", lambda: h.do_bullet("·"), "휴먼명조 15pt, 160%, 3칸 들여"),
+            ("※", lambda: h.do_bullet("※"), "중고딕 12pt, 130%"),
+            ("*", lambda: h.do_bullet("*"), "중고딕 12pt, 130%"),
+        ], cols=6)
+        self.set_extra = tk.Frame(t, bg=SHELL)
+        self.set_extra.pack(fill="x")
+        self.group(t, "항목 번호 (선택하면 다시 매기기)", [
+            (lab, (lambda lv=lv: h.do_level(lv)), "{}단계 · {} (기호 앞 {}칸)".format(
+                lv + 1, "HY헤드라인M 16pt 굵게, 180%" if lv == 0 else "휴먼명조 15pt, 160%", lv))
+            for lv, lab in enumerate(["1.", "가.", "1)", "가)", "(1)", "(가)", "①", "㉮"])
+        ], cols=8)
         self.group(t, "간부회의 자료", [
             ("[ 구분 ]", lambda: h.do_meeting("sec"), "줄에 사업계획·사업실적 등을 써 두고 누르면 [ 사업계획 ] 초록 제목 (맑은 고딕 16 굵게)", {"fg": "#008000"}),
             ("□ 사업", lambda: h.do_meeting("□"), "사업명 줄 — 검정 □ (맑은 고딕 16 굵게)"),
@@ -922,7 +986,7 @@ class App:
             b.bind("<Leave>", self._tip_reset, add="+")
         self.mf_list = tk.Frame(mf, bg=BG)
         self.mf_list.pack(fill="x")
-        self.fmt_hint = tk.Label(mf, text="", font=FONT_S, bg=BG, fg=MUTED, anchor="w", justify="left", wraplength=440)
+        self.fmt_hint = tk.Label(mf, text="", font=FONT_S, bg=BG, fg=MUTED, anchor="w", justify="left", wraplength=400)
         self.fmt_hint.pack(fill="x", padx=2)
 
         # ===== 글자 =====
@@ -941,21 +1005,6 @@ class App:
             ("고급 붙임", lambda: h.run("PasteSpecial"), "골라 붙이기 (서식 없이 붙이기 등)"),
             ("특수문자 ▸", self.dlg_special, "특수문자 80개와 괄호 감싸기", {"raw": True}),
         ])
-        self.group(t, "개조식 기호 (불러온 서식, 없으면 보고서 공통 서식)", [
-            ("□", lambda: h.do_bullet("□"), "휴먼명조 16pt 굵게, 180%"),
-            ("○", lambda: h.do_bullet("○"), "휴먼명조 15pt, 160%, 1칸 들여"),
-            ("-", lambda: h.do_bullet("-"), "휴먼명조 15pt, 160%, 2칸 들여"),
-            ("·", lambda: h.do_bullet("·"), "휴먼명조 15pt, 160%, 3칸 들여"),
-            ("※", lambda: h.do_bullet("※"), "중고딕 12pt, 130%"),
-            ("*", lambda: h.do_bullet("*"), "중고딕 12pt, 130%"),
-        ], cols=6)
-        self.set_extra = tk.Frame(t, bg=SHELL)
-        self.set_extra.pack(fill="x")
-        self.group(t, "항목 번호 (선택하면 다시 매기기)", [
-            (lab, (lambda lv=lv: h.do_level(lv)), "{}단계 · {} (기호 앞 {}칸)".format(
-                lv + 1, "휴먼명조 16pt 굵게, 180%" if lv == 0 else "휴먼명조 15pt, 160%", lv))
-            for lv, lab in enumerate(["1.", "가.", "1)", "가)", "(1)", "(가)", "①", "㉮"])
-        ], cols=8)
         self.group(t, "항목 자동 입력", [
             ("다음 항목", lambda: h.do_item("next"), "위쪽 기호를 보고 같은 단계 다음 번호"),
             ("한 단계 아래", lambda: h.do_item("down"), "하위 단계 첫 번호"),
@@ -987,17 +1036,21 @@ class App:
             ("위첨자 **", lambda: h.do_super("**"), "각주용 ** 위첨자"),
         ], cols=5)
         self.group(t, "글꼴·크기", [
-            ("휴먼명조", lambda: h.char_shape(face="휴먼명조"), "글꼴"),
-            ("중고딕", lambda: h.char_shape(face="중고딕"), "글꼴"),
-            ("맑은 고딕", lambda: h.char_shape(face="맑은 고딕"), "글꼴"),
-            ("HY헤드라인M", lambda: h.char_shape(face="HY헤드라인M"), "글꼴", {"font": FONT_S}),
-        ] + [("{}pt".format(s), (lambda s=s: h.char_shape(size=s)), "글자 크기") for s in (12, 13, 15, 16, 18, 24)],
-            cols=5)
+            [   # 글꼴: 큰 글씨용부터
+                ("HY헤드라인M", lambda: h.char_shape(face="HY헤드라인M"), "글꼴 · 제목 (24·18pt), □ 16pt", {"font": FONT_S}),
+                ("휴먼명조", lambda: h.char_shape(face="휴먼명조"), "글꼴 · 본문, ○ - · 15pt"),
+                ("맑은 고딕", lambda: h.char_shape(face="맑은 고딕"), "글꼴 · 표 12pt, 간부회의 자료"),
+                ("중고딕", lambda: h.char_shape(face="중고딕"), "글꼴 · ※ * 주석 12pt"),
+            ],
+            [("{}pt".format(s), (lambda s=s: h.char_shape(size=s)), "글자 크기 · " + use)   # 크기: 큰 것부터
+             for s, use in ((24, "큰 제목"), (18, "제목"), (16, "□ 줄"), (15, "본문 · ○ - · 줄"),
+                            (13, "작은 본문"), (12, "표 · ※ 주석"))],
+        ])
 
         # ===== 표 =====
         t = self.tab("표")
         self.group(t, "인천상의 표", [
-            ("표 만들기 ▸", self.dlg_table, "머리줄 연파랑, 좌우 바깥선 없음, 위·아래 굵게, 맑은 고딕 12pt", {"raw": True}),
+            ("표 만들기 ▸", self.dlg_table, "인천상의 / 일반 / 선 없음 중 골라 만들기 · 맑은 고딕 12pt, 160% (표 안에서 누르면 칸 안에)", {"raw": True}),
             ("표 색 입히기", h.style_incham_table, "커서가 있는 표를 인천상의 표 모양으로"),
             ("테두리 ▸", self.dlg_border, "위·아래·왼쪽·오른쪽 선 하나씩", {"raw": True}),
             ("배경색 ▸", self.dlg_shade, "선택한 셀 배경색 + 글자색", {"raw": True}),
@@ -1214,9 +1267,21 @@ class App:
                       ("phone", "전화", "032-810-", 13), ("email", "이메일", "@incham.net", 16)]  # 전화는 숫자만, 이메일은 아이디만 써도 됨
 
     def build_profile(self, root):
-        f = tk.LabelFrame(root, text=" 내 정보  ·  양식을 열 때 담당자·연락처 자리에 자동으로 들어감 ", font=FONT_S,
-                          fg=NAVY, bg=BG, padx=8, pady=6)
-        f.pack(fill="x", padx=10, pady=(10, 0))
+        box = tk.Frame(root, bg=BG, highlightthickness=1, highlightbackground=LINE)
+        box.pack(fill="x", padx=8, pady=(6, 0))
+        head = tk.Frame(box, bg=BG, cursor="hand2")
+        head.pack(fill="x")
+        self.pf_arrow = tk.Label(head, text="▸", font=FONT_B, fg=NAVY, bg=BG)
+        self.pf_arrow.pack(side="left", padx=(6, 2), pady=2)
+        tk.Label(head, text="내 정보", font=FONT_B, fg=NAVY, bg=BG).pack(side="left", pady=2)
+        self.pf_sum = tk.Label(head, text="", font=FONT_S, fg=MUTED, bg=BG)
+        self.pf_sum.pack(side="left", padx=6)
+        f = tk.Frame(box, bg=BG, padx=6, pady=2)
+        self.pf_body = f
+        tk.Label(f, text="양식을 열 때 담당자·연락처 자리에 자동으로 들어갑니다", font=FONT_S, fg=MUTED,
+                 bg=BG).grid(row=2, column=0, columnspan=6, sticky="w", padx=(6, 0), pady=(0, 2))
+        for w_ in [head] + head.winfo_children():
+            w_.bind("<Button-1>", lambda e: self.toggle_profile())
         data = styles.load_profile()
         self.pf = {}
         pos = {"dept": (0, 0), "title": (0, 2), "name": (0, 4), "phone": (1, 0), "email": (1, 2)}
@@ -1240,6 +1305,26 @@ class App:
         self.remember = tk.BooleanVar(value=bool(data.get("remember", False)))
         tk.Checkbutton(f, text="기억하기", variable=self.remember, bg=BG, font=FONT_S,
                        command=self.save_profile).grid(row=1, column=5, sticky="w", padx=(8, 0))
+        # 처음엔 접어 둠 (이름이 비어 있으면 펼쳐서 입력하게)
+        self.show_profile(self.store.get("profile_open", not data.get("name")))
+
+    def show_profile(self, open_):
+        if open_:
+            self.pf_body.pack(fill="x")
+        else:
+            self.pf_body.pack_forget()
+        self.pf_arrow.config(text="▾" if open_ else "▸")
+        v = self.profile_values()
+        s = " · ".join(x for x in (v.get("dept"), v.get("title"), v.get("name")) if x)
+        self.pf_sum.config(text=("" if open_ else (s or "눌러서 입력")))
+        self.store["profile_open"] = bool(open_)
+
+    def toggle_profile(self):
+        self.show_profile(not self.pf_body.winfo_ismapped())
+        try:
+            styles.save(self.store)
+        except Exception:
+            pass
 
     def profile_values(self):
         return {k: e.get().strip() for k, e in self.pf.items()}
@@ -1271,21 +1356,21 @@ class App:
 
     # ---------------- 서식 불러오기 ----------------
     def refresh_sets(self):
-        """불러온 서식 안내 + 세트에만 있는 기호 버튼 (글자 탭)"""
+        """불러온 서식 안내 + 그 서식의 기호 버튼 칸 (문서 탭). 기본 개조식 버튼은 항상 보고서 공통 서식."""
         cur = self.store.get("current")
-        if self.hwp.active:
-            keys = [k for k in styles.KEY_ORDER if k in self.hwp.active]
-            self.fmt_hint.config(text="기호 버튼이 지금 '{}' 서식으로 들어갑니다: {}".format(cur, " ".join(keys)), fg="#1a5fb4")
+        keys = [k for k in styles.KEY_ORDER if k in self.hwp.active]
+        if keys:
+            self.fmt_hint.config(text="'{}' 서식 기호는 위 [불러온 서식 기호] 칸에 있습니다: {}".format(cur, " ".join(keys)),
+                                 fg="#1a5fb4")
         else:
-            self.fmt_hint.config(text="기호 버튼이 보고서 공통 서식으로 들어갑니다. 등록한 서식을 열면 그 서식으로 바뀝니다.",
+            self.fmt_hint.config(text="개조식 기호 버튼은 보고서 공통 서식으로 들어갑니다. 등록한 서식을 열면 위에 그 서식의 기호 칸이 생깁니다.",
                                  fg=MUTED)
         for w in self.set_extra.winfo_children():
             w.destroy()
-        extra = [k for k in styles.KEY_ORDER if k in self.hwp.active and k not in ("□", "○", "-", "·", "※", "*")]
-        if extra:
-            items = [(k, (lambda k=k: self.hwp.do_bullet(k)),
-                      "불러온 서식: " + styles.describe(self.hwp.active[k])) for k in extra]
-            self.group(self.set_extra, "불러온 양식에만 있는 기호", items, cols=min(8, max(4, len(items))))
+        if keys:
+            items = [(k, (lambda k=k: self.hwp.set_bullet(k)),
+                      "'{}' 서식: {}".format(cur, styles.describe(self.hwp.active[k]))) for k in keys]
+            self.group(self.set_extra, "불러온 서식 기호 · {}".format(cur), items, cols=min(8, max(4, len(items))))
 
     # ---------------- 내 서식 ----------------
     def myforms(self):
@@ -1536,7 +1621,7 @@ class App:
             else:
                 f2.grid_remove()
 
-        es = self.entry(w, "요지 (한 줄)", 4, "", 40)
+        es = self.entry(w, "요지", 4, "", 40)
         tk.Label(w, text="큰 제목\n(한 줄에 하나)", font=FONT, bg="white", anchor="w", justify="left").grid(row=5, column=0, sticky="nw", pady=2)
         tx = tk.Text(w, font=FONT, width=40, height=6, relief="solid", bd=1)
         tx.grid(row=5, column=1, columnspan=3, sticky="w", pady=2)
@@ -1590,6 +1675,8 @@ class App:
             dst = self.hwp.do_open_weekly(os.path.join(FORMS, "weekly.hwp"))
         elif kind == "card":
             dst = self.hwp.do_open_card(os.path.join(FORMS, "card.hwp"))
+        elif kind == "greeting":
+            dst = self.hwp.do_open_greeting(os.path.join(FORMS, "greeting.hwp"))
         else:
             return
         self.set_status("저장 위치: " + os.path.basename(dst))
@@ -1942,11 +2029,22 @@ class App:
         return w
 
     # ---------------- 표 ----------------
+    TABLE_KINDS = [("incham", "인천상의", "머리줄 연파랑 · 위·제목줄 아래·맨 아래 굵게 · 좌우 바깥선 없음"),
+                   ("plain", "일반", "모든 선 얇은 검정 · 색 없음 · 제목줄 굵게"),
+                   ("none", "선 없음", "선 없이 글자 배치용")]
+
     def dlg_table(self):
-        w = self.popup("인천상의 표 만들기")
-        tk.Label(w, text="머리줄 연파랑 · 좌우 바깥선 없음 · 위아래 굵게", font=FONT_S, fg=MUTED, bg="white").grid(row=0, column=0, columnspan=4, sticky="w")
-        er = self.entry(w, "줄(행) 수", 1, "4", 8)
-        ec = self.entry(w, "칸(열) 수", 2, "3", 8)
+        w = self.popup("표 만들기")
+        kind = tk.StringVar(value=self.store.get("table_kind", "incham"))
+        tk.Label(w, text="표 모양", font=FONT_B, fg=NAVY, bg="white").grid(row=0, column=0, sticky="w")
+        for i, (k, lab, desc) in enumerate(self.TABLE_KINDS):
+            tk.Radiobutton(w, text=lab, variable=kind, value=k, bg="white", font=FONT,
+                           activebackground="white").grid(row=1 + i, column=0, sticky="w")
+            tk.Label(w, text=desc, font=FONT_S, fg=MUTED, bg="white").grid(row=1 + i, column=1, columnspan=3, sticky="w")
+        tk.Label(w, text="글자는 모두 맑은 고딕 12pt · 줄간격 160% · 가운데 / 표 안에서 누르면 그 칸 안에 표를 넣음",
+                 font=FONT_S, fg=MUTED, bg="white").grid(row=4, column=0, columnspan=4, sticky="w", pady=(2, 6))
+        er = self.entry(w, "줄(행) 수", 5, "4", 8)
+        ec = self.entry(w, "칸(열) 수", 6, "3", 8)
 
         def make():
             try:
@@ -1954,12 +2052,18 @@ class App:
             except ValueError:
                 messagebox.showinfo(TITLE, "숫자로 넣어 주세요.", parent=w)
                 return
-            self.call(lambda: self.hwp.do_incham_table(r, c), "표 만들기", parent=w)
+            k = kind.get()
+            self.store["table_kind"] = k                # 다음에 열 때 같은 모양이 골라져 있게
+            try:
+                styles.save(self.store)
+            except Exception:
+                pass
+            self.call(lambda: self.hwp.do_incham_table(r, c, k), "표 만들기", parent=w)
             w.destroy()
 
         tk.Button(w, text="만들기", font=FONT_B, bg=NAVY, fg="white", relief="flat", width=10,
-                  command=make).grid(row=3, column=1, sticky="w", pady=(8, 0))
-        self.close_btn(w, 3)
+                  command=make).grid(row=7, column=1, sticky="w", pady=(8, 0))
+        self.close_btn(w, 7)
 
     def dlg_border(self):
         w = self.popup("테두리 (선택한 셀)")

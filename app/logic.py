@@ -25,9 +25,9 @@ NUM_PATTERNS = [
 ]
 
 # 보고서 공통 서식 (기호, 글꼴, 크기, 굵게, 줄간격 %, 문단 위 pt)
-# □ 휴먼명조 16 굵게 180% / ○·-·· 휴먼명조 15 160% (1·2·3칸 들여) / ※ 중고딕 12 130%
+# □ HY헤드라인M 16 굵게 180% (인천시·중앙부처 관행) / ○·-·· 휴먼명조 15 160% (1·2·3칸 들여) / ※ 중고딕 12 130%
 BULLETS = {
-    "□": {"text": "□ ", "face": "휴먼명조", "size": 16, "bold": True, "spacing": 180, "prev": 10},
+    "□": {"text": "□ ", "face": "HY헤드라인M", "size": 16, "bold": True, "spacing": 180, "prev": 10},
     "○": {"text": " ○ ", "face": "휴먼명조", "size": 15, "bold": False, "spacing": 160, "prev": 5},
     "-": {"text": "  - ", "face": "휴먼명조", "size": 15, "bold": False, "spacing": 160, "prev": 5},
     "·": {"text": "   · ", "face": "휴먼명조", "size": 15, "bold": False, "spacing": 160, "prev": 5},
@@ -1046,6 +1046,47 @@ def week_period(d=None):
     end = start + datetime.timedelta(days=6)
     f = lambda x: "{}. {}. {}.".format(x.year % 100, x.month, x.day)
     return "{} ~ {}".format(f(start), f(end))
+
+
+def week_period_short(d=None):
+    """파일 이름용 기간: '11.22.~11.28.' (week_period 와 같은 주)"""
+    d = d or datetime.date.today()
+    start = d + datetime.timedelta(days=(6 - d.weekday()) % 7)
+    end = start + datetime.timedelta(days=6)
+    return "{}.{}.~{}.{}.".format(start.month, start.day, end.month, end.day)
+
+
+def safe_filename(s, limit=120):
+    """파일 이름에 못 쓰는 글자(\\ / : * ? " < > |)와 줄바꿈을 빼고 공백 정리"""
+    s = re.sub(r'[\\/:*?"<>|\r\n\t]', " ", s or "")
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s[:limit].strip() or "문서"
+
+
+def doc_name(kind, dept="", what="", name="", d=None):
+    """양식을 열 때 붙는 파일 이름(확장자 없음). 모르는 부분은 '제목' 같은 안내 글자 — 나중에 고쳐 저장.
+    kind: report press letter weekly travel overtime greeting card cert myform plain"""
+    ymd = (d or datetime.date.today()).strftime("%y%m%d")
+    dept = (dept or "").strip() or "부서"
+    if kind in ("report", "press"):
+        s = "{} 제목".format(ymd)
+    elif kind == "letter":
+        s = "[공문] 제목"
+    elif kind == "weekly":
+        s = "[{}] 보도자료 배포계획_{}".format(week_period_short(d), dept)
+    elif kind == "travel":
+        s = "여비계산서(목적)"
+    elif kind == "overtime":
+        s = "{} 시간외 근로 현황(내용)".format(dept)     # (내용)은 안내 글자 — 나중에 고쳐 저장
+    elif kind == "greeting":
+        s = "{} 행사명 인사말씀".format(ymd)
+    elif kind == "card":
+        s = "{} 법인카드 사용내역_{}".format(ymd, dept)
+    elif kind == "cert":
+        s = "{} 수료증_{}".format(ymd, (name or "").strip() or "과정명")
+    else:                                   # myform · plain(인천시 양식 등)
+        s = "{} {}".format(ymd, (name or "").strip() or "문서")
+    return safe_filename(s)
 
 
 # ---------- 시간외 근무 ----------
